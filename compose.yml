@@ -116,8 +116,6 @@ services:
     networks:
       - private_net
 
-  # Optional: postgres-meta for TypeScript type generation (`--profile dashboard`). Not Studio.
-
   auth:
     image: supabase/auth:v2.192.0
     logging: *default-logging
@@ -211,7 +209,7 @@ services:
       REPLICATION_POLL_INTERVAL: 100
       SECURE_CHANNELS: "true"
       # Max 63 chars total: supabase_realtime_messages_replication_slot_ (45) + suffix (≤18).
-      SLOT_NAME_SUFFIX: ${SLOT_NAME_SUFFIX:-rls}
+      SLOT_NAME_SUFFIX: ${SLOT_NAME_SUFFIX:-local}
       REALTIME_IP_VERSION: ipv4
 
       # Self-host tenant
@@ -280,10 +278,12 @@ services:
     environment:
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
-      RUST_LOG: ${RUST_LOG:-warn}
+
       RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
-      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
       RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
+
+      RUST_LOG: ${RUST_LOG:-warn}
     volumes:
       - rustfs_data:/data
     networks:
@@ -347,7 +347,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.62.5
+    image: supabase/storage-api:v1.62.7
     logging: *default-logging
     container_name: supabase-storage
     restart: always
@@ -415,6 +415,7 @@ services:
       SUPABASE_PUBLIC_URL: ${PUBLIC_API_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY_ASYMMETRIC}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
+
       # SUPABASE_PUBLISHABLE_KEYS:
       # SUPABASE_SECRET_KEYS:
     volumes:
