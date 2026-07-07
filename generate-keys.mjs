@@ -43,7 +43,6 @@ function randomBase6448() {
 const FILL_SECRETS = [
 	{ key: 'POSTGRES_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'AUTH_DB_PASSWORD', generate: () => randomHex(32) },
-	{ key: 'REALTIME_DB_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'STORAGE_DB_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'PGRST_AUTH_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'SECRET_KEY_BASE', generate: () => randomBase6448() },

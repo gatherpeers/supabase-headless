@@ -29,7 +29,8 @@ It creates:
 
 - Schemas: `auth`, `extensions`, `_realtime`, `realtime`, `storage`
 - API roles: `anon`, `authenticated`, `service_role`
-- Service roles: `supabase_auth_admin`, `supabase_realtime_admin`, `supabase_storage_admin`, and PostgREST's `authenticator`
+- Service roles: `supabase_auth_admin`, `supabase_storage_admin`, and PostgREST's `authenticator`
+- Ownership-only: `supabase_realtime_admin`, `dashboard_user` (stub for Realtime migrations)
 - Extensions: `pg_stat_statements`, `postgis`, `pgcrypto`
 - Publication: `supabase_realtime`
 - Default privileges for API roles on `public` and `storage`

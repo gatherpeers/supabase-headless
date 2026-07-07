@@ -4,7 +4,6 @@
 
 \getenv postgres_db POSTGRES_DB
 \getenv auth_db_password AUTH_DB_PASSWORD
-\getenv realtime_db_password REALTIME_DB_PASSWORD
 \getenv storage_db_password STORAGE_DB_PASSWORD
 \getenv pgrst_auth_user PGRST_AUTH_USER
 \getenv pgrst_auth_password PGRST_AUTH_PASSWORD
@@ -25,18 +24,17 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA extensions;
 CREATE ROLE anon NOLOGIN;
 CREATE ROLE authenticated NOLOGIN;
 CREATE ROLE service_role NOLOGIN BYPASSRLS;
+-- Stub for Realtime v2.112.7+ migrations (REVOKE on realtime.schema_migrations); unused on self-host.
+CREATE ROLE dashboard_user NOLOGIN;
 
 -- Auth
 CREATE ROLE supabase_auth_admin LOGIN PASSWORD :'auth_db_password';
 ALTER SCHEMA auth OWNER TO supabase_auth_admin;
 ALTER ROLE supabase_auth_admin SET search_path to auth, public, extensions;
 
--- Realtime runtime role (least-privilege; mirrors the official supabase/postgres init script).
--- Since v2.109.0 Realtime runs its migrations as the superuser DB_USER, but the *runtime* connection uses this role and still needs:
---   * LOGIN + REPLICATION  -> open replication connections (Postgres-changes CDC + broadcast-from-db)
---   * CREATE ON DATABASE   -> create the "realtime_messages_publication" used by broadcast-from-db membership in anon/authenticated/service_role -> SET ROLE to evaluate RLS as the API roles SET on log_min_messages -> realtime.list_changes()
--- Ownership of realtime.messages is transferred to this role by Realtime's base migrations, but realtime.subscription (and future realtime tables) are only handed over by the flag-gated setup migration. Since that flag is impractical on self-host, we instead let this role access whatever the superuser migrations create in the realtime schema (see ALTER DEFAULT PRIVILEGES below).
-CREATE ROLE supabase_realtime_admin NOINHERIT LOGIN REPLICATION PASSWORD :'realtime_db_password';
+-- Realtime ownership role (NOLOGIN). Realtime v2.112.7+ connects as DB_USER (postgres).
+-- RestrictRealtimeSchema tenant migration transfers realtime.* object ownership here.
+CREATE ROLE supabase_realtime_admin NOINHERIT NOLOGIN NOREPLICATION;
 ALTER SCHEMA _realtime OWNER TO supabase_realtime_admin;
 ALTER ROLE supabase_realtime_admin SET search_path TO public, extensions, realtime;
 GRANT CREATE ON DATABASE :"postgres_db" TO supabase_realtime_admin;
@@ -49,10 +47,6 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_realtime_admin;
 GRANT CREATE, USAGE ON SCHEMA _realtime TO supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role;
 GRANT ALL ON SCHEMA realtime TO supabase_realtime_admin WITH GRANT OPTION;
--- Realtime's superuser migrations create realtime.subscription (and any future realtime tables)
--- owned by postgres; auto-grant this role access so Postgres-changes CDC can read/write them.
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA realtime GRANT ALL ON TABLES TO supabase_realtime_admin;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA realtime GRANT ALL ON SEQUENCES TO supabase_realtime_admin;
 
 -- Storage
 CREATE ROLE supabase_storage_admin LOGIN PASSWORD :'storage_db_password';
