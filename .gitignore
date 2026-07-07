@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+
+logs/
+*.log
+
+caddy-local-root.crt
+database.types.ts
+
+scripts/supabase-js/node_modules/

@@ -1,0 +1,15 @@
+{
+  "name": "@supabase-headless/supabase-js-tests",
+  "private": true,
+  "type": "module",
+  "main": "run.mjs",
+  "scripts": {
+    "test": "node ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.0"
+  }
+}

@@ -1,0 +1,506 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    logging: *default-logging
+    container_name: supabase-db
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    shm_size: ${DB_SHM_SIZE:-1GB}
+    command: >
+      postgres
+      -c port=${POSTGRES_PORT:-5432}
+      -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      -c max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_slot_wal_keep_size=4GB
+      -c max_wal_senders=10
+      -c log_min_messages=fatal
+      -c work_mem=${POSTGRES_WORK_MEM:-6MB}
+      -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-200}
+      -c shared_preload_libraries='pg_stat_statements'
+      -c pg_stat_statements.track=all
+      -c password_encryption=scram-sha-256
+    environment:
+      # Database config
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8 --text-search-config=simple"
+      PGDATA: /var/lib/postgresql/data
+
+      # Entrypoint bootstrap (db/init.sql)
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      REALTIME_DB_PASSWORD: ${REALTIME_DB_PASSWORD}
+      STORAGE_DB_PASSWORD: ${STORAGE_DB_PASSWORD}
+      PGRST_AUTH_USER: ${PGRST_AUTH_USER:-authenticator}
+      PGRST_AUTH_PASSWORD: ${PGRST_AUTH_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - private_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p ${POSTGRES_PORT:-5432} -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Automatic database migrations: stack -> app (if mounted by user). Runs psql, thus never starts a Postgres server.
+  db-migrate:
+    image: postgres:18.4-alpine
+    container_name: supabase-db-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: ${POSTGRES_PORT:-5432}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-postgres}
+    volumes:
+      - ./db/migrate.sh:/migrate.sh:ro
+      - ./db/stack/schema.sql:/stack/schema.sql:ro
+      - ./db/stack/migrations:/stack/migrations:ro
+      - ./db/app/schema.sql:/app/schema.sql:ro
+      - ./db/app/migrations:/app/migrations:ro
+    command: ["sh", "/migrate.sh"]
+    networks:
+      - private_net
+
+  # Isolated from the default compose, used to generate on-demand database types.
+  postgres-meta:
+    image: supabase/postgres-meta:v0.96.6
+    container_name: supabase-postgres-meta
+    profiles: ['dashboard']
+    restart: always
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      PG_META_HOST: 0.0.0.0
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: ${POSTGRES_USER:-postgres}
+      PG_META_DB_PORT: ${POSTGRES_PORT:-5432}
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - private_net
+
+  # Optional: postgres-meta for TypeScript type generation (`--profile dashboard`). Not Studio.
+
+  auth:
+    image: supabase/auth:v2.192.0
+    logging: *default-logging
+    container_name: supabase-auth
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Boot wiring
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${AUTH_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}?sslmode=disable
+
+      API_EXTERNAL_URL: ${PUBLIC_API_URL}
+      GOTRUE_SITE_URL: ${APP_URL}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
+      GOTRUE_RATE_LIMIT_HEADER: ${GOTRUE_RATE_LIMIT_HEADER:-X-Forwarded-For}
+      GOTRUE_REQUEST_ID_HEADER: ${GOTRUE_REQUEST_ID_HEADER:-X-Request-ID}
+      GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: ${GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED:-true}
+      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-warn}
+
+      # JWT (from generate-keys / .env)
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_KEYS: ${JWT_KEYS}
+      GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
+      GOTRUE_JWT_EXP: ${JWT_EXP}
+      GOTRUE_JWT_AUD: ${JWT_AUD}
+      # Still necessary despite deprecation warnings. Without it, GoTrue issues user JWTs with an empty "role" claim.
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+    networks:
+      - private_net
+      - public_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  realtime:
+    image: supabase/realtime:v2.112.6
+    logging: *default-logging
+    container_name: supabase-realtime
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Server
+      PORT: 4000
+      APP_NAME: realtime
+
+      # DB - migrations (superuser)
+      DB_HOST: db
+      DB_PORT: ${POSTGRES_PORT:-5432}
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # DB - runtime (least privilege)
+      DB_USER_REALTIME: supabase_realtime_admin
+      DB_PASS_REALTIME: ${REALTIME_DB_PASSWORD}
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime, extensions, public"
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      # Silence IPv4 warnings
+      DB_IP_VERSION: ipv4
+      DB_SSL: "false"
+      # DB_SSL_CA_CERT:
+
+      # Auth / crypto
+      API_JWT_SECRET: ${JWT_SECRET}
+      API_JWT_JWKS: ${JWT_JWKS}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      RUN_JANITOR: "true"
+
+      # Replication
+      REPLICATION_MODE: RLS
+      REPLICATION_POLL_INTERVAL: 100
+      SECURE_CHANNELS: "true"
+      # Max 63 chars total: supabase_realtime_messages_replication_slot_ (45) + suffix (≤18).
+      SLOT_NAME_SUFFIX: ${SLOT_NAME_SUFFIX:-rls}
+      REALTIME_IP_VERSION: ipv4
+
+      # Self-host tenant
+      SEED_SELF_HOST: "true"
+      SELF_HOST_TENANT_NAME: ${PUBLIC_API_DOMAIN}
+
+      # Dashboard
+      DASHBOARD_AUTH: ${REALTIME_DASHBOARD_AUTH:-basic_auth}
+      DASHBOARD_USER: ${REALTIME_DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD: ${REALTIME_DASHBOARD_PASSWORD}
+
+      # Logging
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+      LOG_LEVEL: ${REALTIME_LOG_LEVEL:-warning}
+    networks:
+      - private_net
+    healthcheck:
+      # Tenant /health validates the legacy HS256 anon JWT. ES256 ANON_KEY_ASYMMETRIC returns 403.
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://127.0.0.1:4000/api/tenants/${PUBLIC_API_DOMAIN}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  rest:
+    image: postgrest/postgrest:v14.14
+    logging: *default-logging
+    container_name: supabase-rest
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://${PGRST_AUTH_USER:-authenticator}:${PGRST_AUTH_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,storage}
+      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE:-anon}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+
+      # JWKS so PostgREST can verify both ES256 (asymmetric) and HS256 (symmetric) tokens.
+      PGRST_JWT_SECRET: ${JWT_JWKS}
+
+      PGRST_OPENAPI_SERVER_PROXY_URI: ${PUBLIC_API_URL}${REST_PREFIX:-/rest/v1}
+      PGRST_DB_POOL: ${PGRST_DB_POOL:-20}
+      PGRST_LOG_LEVEL: ${PGRST_LOG_LEVEL:-warn}
+
+      # Healthcheck
+      PGRST_SERVER_HOST: 0.0.0.0
+      PGRST_ADMIN_SERVER_HOST: 127.0.0.1
+      PGRST_ADMIN_SERVER_PORT: 3001
+    networks:
+      - private_net
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-beta.8
+    container_name: supabase-rustfs
+    restart: always
+    logging: *default-logging
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUST_LOG: ${RUST_LOG:-warn}
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - private_net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rustfs-createbucket:
+    image: rustfs/rc:v0.1.25
+    container_name: supabase-rustfs-createbucket
+    restart: "no"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -ec "
+      rc alias set supa-rustfs http://rustfs:9000 ${RUSTFS_ACCESS_KEY} ${RUSTFS_SECRET_KEY} &&
+      rc mb --ignore-existing supa-rustfs/${GLOBAL_S3_BUCKET:-supabase-global}
+      "
+    networks:
+      - private_net
+
+  imgproxy:
+    image: darthsim/imgproxy:v4.0.11
+    container_name: supabase-imgproxy
+    restart: always
+    depends_on:
+      rustfs:
+        condition: service_healthy
+      rustfs-createbucket:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1G
+    logging: *default-logging
+    environment:
+      IMGPROXY_USE_S3: "true"
+      IMGPROXY_S3_ENDPOINT: http://rustfs:9000
+      AWS_REGION: ${S3_REGION:-local}
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
+      IMGPROXY_FAIL_ON_DEPRECATION: ${IMGPROXY_FAIL_ON_DEPRECATION:-true}
+      IMGPROXY_BIND: :5001
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_AUTO_WEBP: "true"
+      AWS_S3_FORCE_PATH_STYLE: "true"
+    networks:
+      - private_net
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  storage:
+    image: supabase/storage-api:v1.62.5
+    logging: *default-logging
+    container_name: supabase-storage
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+      imgproxy:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      rustfs-createbucket:
+        condition: service_completed_successfully
+    environment:
+      ANON_KEY: ${ANON_KEY_ASYMMETRIC}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
+      LOG_LEVEL: ${STORAGE_LOG_LEVEL:-warn}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_JWKS}
+      JWT_JWKS: ${JWT_JWKS}
+      DATABASE_URL: postgres://supabase_storage_admin:${STORAGE_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      STORAGE_BACKEND: s3
+      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET:-supabase-global}
+      GLOBAL_S3_ENDPOINT: http://rustfs:9000
+      GLOBAL_S3_PROTOCOL: http
+      GLOBAL_S3_FORCE_PATH_STYLE: "true"
+      REGION: ${S3_REGION:-local}
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      STORAGE_PUBLIC_URL: ${PUBLIC_API_URL}
+      # Honour the gateway's X-Forwarded-Prefix header so S3 SigV4 signature verification and TUS upload Location URLs reconstruct the original /storage/v1 prefix correctly.
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      TUS_URL_PATH: ${STORAGE_PREFIX:-/storage/v1}/upload/resumable
+      TUS_ALLOW_S3_TAGS: "false"
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      TENANT_ID: default
+      IMGPROXY_URL: http://imgproxy:5001
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+    networks:
+      - private_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  functions:
+    image: supabase/edge-runtime:v1.74.2
+    container_name: supabase-functions
+    restart: always
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    environment:
+      SUPABASE_URL: http://gateway
+      SUPABASE_PUBLIC_URL: ${PUBLIC_API_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY_ASYMMETRIC}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
+      # SUPABASE_PUBLISHABLE_KEYS:
+      # SUPABASE_SECRET_KEYS:
+    volumes:
+      - ./functions:/home/deno/functions:ro
+    command: start --main-service /home/deno/functions
+    networks:
+      - private_net
+      - public_net
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000 && printf \"GET /_internal/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && head -1 <&3 | grep -q \"200 OK\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  gateway:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    logging: *default-logging
+    container_name: supabase-gateway
+    restart: always
+    # Expose :80/:443 only after upstreams and app SQL migrations are ready.
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      auth:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+      functions:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - ./logs/caddy:/var/log/caddy
+    environment:
+      PUBLIC_API_DOMAIN: ${PUBLIC_API_DOMAIN}
+      CADDY_CONTACT_EMAIL: ${CADDY_CONTACT_EMAIL:-admin@localhost}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN}
+      GATEWAY_RATE_LIMIT_EVENTS: ${GATEWAY_RATE_LIMIT_EVENTS:-100}
+      GATEWAY_RATE_LIMIT_WINDOW: ${GATEWAY_RATE_LIMIT_WINDOW:-1s}
+      AUTH_PREFIX: ${AUTH_PREFIX:-/auth/v1}
+      REST_PREFIX: ${REST_PREFIX:-/rest/v1}
+      REALTIME_PREFIX: ${REALTIME_PREFIX:-/realtime/v1}
+      STORAGE_PREFIX: ${STORAGE_PREFIX:-/storage/v1}
+      FUNCTIONS_PREFIX: ${FUNCTIONS_PREFIX:-/functions/v1}
+      REALTIME_DASHBOARD_PREFIX: ${REALTIME_DASHBOARD_PREFIX:-/admin}
+      CADDY_LOG_LEVEL: ${CADDY_LOG_LEVEL:-WARN}
+      # API key translation: opaque sb_* keys -> internal asymmetric JWTs, plus accept-list of asymmetric (*_ASYMMETRIC) and legacy (ANON_KEY / SERVICE_ROLE_KEY HS256) JWTs that pass through the gateway untouched. The `:-__unset_*__` defaults ensure each map input stays unique even when an env var is unset or empty (Caddy's `map` directive rejects duplicate inputs at config-load time, and an empty string for two rows would collide).
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-__unset_publishable_key__}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-__unset_secret_key__}
+      ANON_KEY_ASYMMETRIC: ${ANON_KEY_ASYMMETRIC:-__unset_anon_key_asymmetric__}
+      SERVICE_ROLE_KEY_ASYMMETRIC: ${SERVICE_ROLE_KEY_ASYMMETRIC:-__unset_service_role_key_asymmetric__}
+      ANON_KEY: ${ANON_KEY:-__unset_legacy_anon_key__}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:-__unset_legacy_service_role_key__}
+    networks:
+      - public_net
+      - private_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  db_data:
+  rustfs_data:
+  caddy_data:
+
+networks:
+  public_net:
+    driver: bridge
+  private_net:
+    driver: bridge
+    internal: true

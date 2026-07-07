@@ -1,0 +1,428 @@
+{
+	email {$CADDY_CONTACT_EMAIL}
+	skip_install_trust
+	log {
+		level {$CADDY_LOG_LEVEL}
+	}
+
+	# Server-wide options. When running behind a CDN/L7 proxy (Cloudflare, Fastly, ALB, …) uncomment `trusted_proxies` so Caddy parses the real client IP out of forwarded headers; this also makes {client_ip}, rate_limit, GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED, and access logs use the actual visitor IP instead of the immediate Docker peer. `private_ranges` already covers RFC1918 + ::1; replace or extend with the CDN's public ranges as needed.
+	# https://caddyserver.com/docs/caddyfile/options#trusted-proxies
+	servers {
+		# trusted_proxies static private_ranges
+		# trusted_proxies_strict
+		# client_ip_headers X-Forwarded-For CF-Connecting-IP
+	}
+}
+
+# ============================================================================
+# Snippets — mirror the official Supabase Envoy filter chain in volumes/api/envoy/lds.template.yaml. Snippet names match the Envoy filter they replace so the two configs are easy to cross-reference. Routes below also carry their Envoy/Kong route names in comments (auth-v1-protected, rest-v1-protected, realtime-v1-ws-protected, etc.).
+# ============================================================================
+
+# Front-edge sliding-window rate limit. Caddy-only addition; Kong/Envoy do not rate-limit at the gateway by default in the upstream Supabase setup.
+(api_rate_limit) {
+	rate_limit {
+		zone my_api_zone {
+			# {client_ip} resolves to the immediate peer when no CDN is in front, or to the parsed real client IP once `trusted_proxies` is configured in the global `servers {}` block above.
+			key {client_ip}
+			events {$GATEWAY_RATE_LIMIT_EVENTS}
+			window {$GATEWAY_RATE_LIMIT_WINDOW}
+		}
+	}
+}
+
+# Caddy already auto-injects Host, X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host on every reverse_proxy (see "Defaults" in the reverse_proxy docs). We only add the two headers Supabase services read in addition:
+#  - X-Real-IP: gotrue/postgrest helpers consume it as a single-IP fallback.
+#  - X-Request-ID: GOTRUE_REQUEST_ID_HEADER and access-log correlation.
+(forwarded_headers) {
+	header_up X-Real-IP {client_ip}
+	header_up X-Request-ID {request_id}
+}
+
+# Resolves the Apikey header to the matching internal asymmetric JWT. Mirrors the combined effect of Envoy's "translate apikey in header" Lua filter and the accept-list inside the "401 for missing/invalid API key" filter:
+#   1. SUPABASE_PUBLISHABLE_KEY        -> swap to ANON_KEY_ASYMMETRIC         (anon)
+#   2. SUPABASE_SECRET_KEY             -> swap to SERVICE_ROLE_KEY_ASYMMETRIC (service_role)
+#   3. ANON_KEY_ASYMMETRIC             -> pass through                        (anon)
+#   4. SERVICE_ROLE_KEY_ASYMMETRIC     -> pass through                        (service_role)
+#   5. ANON_KEY (legacy HS256)         -> pass through                        (anon)
+#   6. SERVICE_ROLE_KEY (legacy HS256) -> pass through                        (service_role)
+# Cases 3-4 let Edge Functions (and any internal caller) reach the gateway carrying the internal asymmetric JWT they were configured with. Cases 5-6 are the legacy backward-compat path the platform still accepts.
+
+# Output (custom placeholders, populated by the map directive):
+#   {_translated_apikey} = JWT to forward upstream (or "")
+#   {_role}              = "anon" | "service_role" | ""
+# An empty role means "no recognised key supplied" (missing, invalid, or AWS SigV4). Subsequent snippets read these directly via the `vars` matcher's placeholder form (canonical Caddy idiom, see https://caddyserver.com/docs/caddyfile/matchers#vars).
+#
+# compose.yml passes a unique unmatchable sentinel for any blank key ("__unset_<name>__"), so the map's input-uniqueness check holds even when legacy keys are not configured. Real Apikey headers never collide with the sentinels.
+(api_key_lookup) {
+	map {http.request.header.Apikey} {_translated_apikey} {_role} {
+		"{$SUPABASE_PUBLISHABLE_KEY}" "{$ANON_KEY_ASYMMETRIC}" "anon"
+		"{$SUPABASE_SECRET_KEY}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
+		"{$ANON_KEY_ASYMMETRIC}" "{$ANON_KEY_ASYMMETRIC}" "anon"
+		"{$SERVICE_ROLE_KEY_ASYMMETRIC}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
+		"{$ANON_KEY}" "{$ANON_KEY}" "anon"
+		"{$SERVICE_ROLE_KEY}" "{$SERVICE_ROLE_KEY}" "service_role"
+		default "" ""
+	}
+}
+
+# Mirrors Envoy's first Lua filter "Copy ?apikey query to header" (lds.template.yaml ~lines 547-592). Browser WebSocket clients cannot set custom upgrade headers, so the apikey arrives in the URL.
+(apikey_from_query) {
+	@apikey_only_in_query {
+		not header Apikey *
+		expression `{http.request.uri.query.apikey} != ""`
+	}
+	request_header @apikey_only_in_query Apikey {http.request.uri.query.apikey}
+}
+
+# Mirrors Envoy's "401 for missing/invalid API key" filter (lines 864-934). Apply on PROTECTED routes (auth-v1-protected, rest-v1-protected, graphql-v1-protected, realtime-v1-api-protected, realtime-v1-ws-protected, pg-protected). NOT applied on Storage/Functions/open routes.
+(reject_invalid_apikey) {
+	@no_known_key vars {_role} ""
+	handle @no_known_key {
+		header Content-Type "application/json"
+		respond `{"message":"No API key found in request"}` 401
+	}
+}
+
+# Mirrors Envoy's "translate apikey in header" Lua filter (lines 714-771). No-op when no recognised key was supplied (so AWS SigV4 / unauthenticated calls pass through untouched on routes where they are allowed).
+(translate_apikey_header) {
+	@translate_has_known_key not vars {_role} ""
+	request_header @translate_has_known_key Apikey {_translated_apikey}
+}
+
+# Mirrors Envoy's "translate apikey in query" Lua filter (lines 594-712). Required for the Realtime WebSocket route where browsers carry the key in the URL. Caddy `uri ... query` is regex find/replace; the pattern matches "apikey=" followed by any non-"&" characters (safe — both opaque keys and base64url JWTs contain only URL-safe characters).
+(translate_apikey_query) {
+	@known_key_in_query {
+		expression `{http.request.uri.query.apikey} != ""`
+		not vars {_role} ""
+	}
+	uri @known_key_in_query query "apikey=[^&]+" "apikey={_translated_apikey}"
+}
+
+# Mirrors Envoy's "synth Authorization" Lua filter (lines 796-862). Synthesizes `Authorization: Bearer <internal asymmetric JWT>` when the client did not send a real bearer token of its own.
+#
+# DELIBERATE DIVERGENCE FROM ENVOY (kept — strictly safer):
+# Envoy's `has_real_jwt` returns false for ANY Authorization that does not begin with "Bearer " (for example AWS SigV4: `AWS4-HMAC-SHA256 Credential=…`), so when an apikey is also present Envoy would overwrite the SigV4 header. We only synthesize in two cases, both gated on a known sb_*/internal asymmetric JWTs/legacy key being present:
+#   1. Authorization is absent or empty.
+#   2. Authorization starts with "Bearer sb_" (the client passed an opaque key in both headers, which is not a valid JWT).
+# Any other Authorization (real Bearer JWT, AWS SigV4, anything else) is left untouched. In practice no real client sends both SigV4 and an sb_* apikey, so the only observable effect is preserving SigV4 on Storage — which is the correct behaviour.
+(synth_authorization) {
+	@auth_missing_or_empty {
+		not header_regexp Authorization "^.+$"
+		not vars {_role} ""
+	}
+	request_header @auth_missing_or_empty Authorization "Bearer {_translated_apikey}"
+
+	@auth_is_sb_key {
+		header_regexp Authorization "^Bearer sb_"
+		not vars {_role} ""
+	}
+	request_header @auth_is_sb_key Authorization "Bearer {_translated_apikey}"
+}
+
+# Mirrors Envoy's "mirror apikey to x-api-key" Lua filter (lines 773-794). Realtime WebSocket reads X-Api-Key first.
+(mirror_x_api_key) {
+	@mirror_has_known_key not vars {_role} ""
+	request_header @mirror_has_known_key X-Api-Key {_translated_apikey}
+}
+
+# ============================================================================
+# Internal mailer template host (not published to host ports)
+# ============================================================================
+:8081 {
+	handle_path /mailer/* {
+		root * /srv/auth-mailer
+		file_server
+	}
+	respond 404
+}
+
+# ============================================================================
+# Public site
+# ============================================================================
+{$PUBLIC_API_DOMAIN}, http://gateway {
+	encode zstd gzip
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+	}
+
+	# Default response headers
+	header {
+		defer
+		Access-Control-Allow-Origin "{$CORS_ALLOWED_ORIGIN}"
+		Access-Control-Expose-Headers "tus-resumable, upload-offset, upload-length, location, x-upsert"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		X-XSS-Protection "1; mode=block"
+	}
+
+	# Top-level route block enforces source-order matching for the handle blocks below (open routes must be checked before the protected /auth/v1/* catch-all, /realtime/v1/api/* before /realtime/v1/*, etc.).
+	route {
+		# ============================================================
+		# CORS preflight
+		# Access-Control-Allow-Origin and Access-Control-Expose-Headers are emitted by the outer `header { defer ... }` block for every response (including this 204), so they are not repeated here.
+		# ============================================================
+		@options method OPTIONS
+		handle @options {
+			header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
+			header Access-Control-Allow-Headers "Origin, Accept, Accept-Profile, Authorization, Content-Type, Content-Profile, apikey, x-client-info, prefer, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert, x-signature"
+			header Access-Control-Max-Age "3600"
+			respond 204
+		}
+
+		# ============================================================
+		# OPEN routes (no apikey required)
+		# Mirror Envoy's auth-v1-open-* / well-known-oauth / sso-* routes.
+		# ============================================================
+
+		# auth-v1-open-verify    -> auth:9999/verify                (email confirm/recovery/invite/email-change links)
+		# auth-v1-open-callback  -> auth:9999/callback              (OAuth callback redirect target)
+		# auth-v1-open-authorize -> auth:9999/authorize             (OAuth authorize entry)
+		# auth-v1-open-jwks      -> auth:9999/.well-known/jwks.json (third-party JWT verification)
+		@auth_open path {$AUTH_PREFIX}/verify {$AUTH_PREFIX}/verify/* {$AUTH_PREFIX}/callback {$AUTH_PREFIX}/callback/* {$AUTH_PREFIX}/authorize {$AUTH_PREFIX}/authorize/* {$AUTH_PREFIX}/.well-known/jwks.json
+		handle @auth_open {
+			uri strip_prefix {$AUTH_PREFIX}
+			import api_rate_limit
+			reverse_proxy auth:9999 {
+				import forwarded_headers
+				header_up X-Forwarded-Prefix {$AUTH_PREFIX}
+			}
+		}
+
+		# well-known-oauth -> auth:9999/.well-known/oauth-authorization-server (RFC 8414)
+		@oauth_meta path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/*
+		handle @oauth_meta {
+			import api_rate_limit
+			reverse_proxy auth:9999 {
+				import forwarded_headers
+				header_up X-Forwarded-Prefix /.well-known/oauth-authorization-server
+			}
+		}
+
+		# auth-v1-open-sso-acs      -> auth:9999/sso/saml/acs
+		# auth-v1-open-sso-metadata -> auth:9999/sso/saml/metadata
+		@sso_saml path /sso/saml/acs /sso/saml/acs/* /sso/saml/metadata /sso/saml/metadata/*
+		handle @sso_saml {
+			import api_rate_limit
+			reverse_proxy auth:9999 {
+				import forwarded_headers
+				header_up X-Forwarded-Prefix {path}
+			}
+		}
+
+		# ============================================================
+		# PROTECTED routes (apikey required)
+		# ============================================================
+
+		# auth-v1-protected -> auth:9999/*
+		handle_path {$AUTH_PREFIX}/* {
+			route {
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				reverse_proxy auth:9999 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$AUTH_PREFIX}/
+				}
+			}
+		}
+
+		# rest-v1-protected -> rest:3000/*
+		handle_path {$REST_PREFIX}/* {
+			route {
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				reverse_proxy rest:3000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$REST_PREFIX}/
+				}
+			}
+		}
+
+		# graphql-v1-protected -> rest:3000/rpc/graphql (with Content-Profile: graphql_public)
+		# Add the postgres-meta service and a `graphql` schema first; this is kept here for parity. pg_graphql is not part of the default custom stack but the route exists so it works the moment you enable it.
+		@graphql path /graphql/v1 /graphql/v1/*
+		handle @graphql {
+			route {
+				@no_content_profile not header Content-Profile *
+				request_header @no_content_profile Content-Profile graphql_public
+				rewrite * /rpc/graphql
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				reverse_proxy rest:3000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix /graphql/v1
+				}
+			}
+		}
+
+		# Custom: redirect /realtime/v1/admin/* -> /admin/* so the admin dashboard URL can live at the conventional /admin path while still being reachable through the realtime-prefixed legacy URL.
+		handle_path {$REALTIME_PREFIX}{$REALTIME_DASHBOARD_PREFIX}/* {
+			redir https://{host}{$REALTIME_DASHBOARD_PREFIX}{path} 301
+		}
+
+		# realtime-v1-api-tenants-blocked / realtime-v1-api-openapi-blocked
+		# Block the Realtime *management* REST API at the gateway. Mirrors supabase/supabase#46856 (Kong request-termination 403 / Envoy per-route RBAC DENY on these two subpaths).
+		# /realtime/v1/api/tenants is tenant CRUD — it leaks/edits every tenant's JWT secret — and /realtime/v1/api/openapi dumps the management OpenAPI spec. The realtime-v1-api route below only checks that SOME valid key is present, and the anon/publishable key is public, so without this deny any client could read or modify tenants. Respond 403 unconditionally (no apikey processing, matching upstream "blocked even with a valid key"). MUST stay above @realtime_api to win source-order matching; /realtime/v1/api/ping and the rest of the Realtime REST API (broadcast, channels, …) remain reachable through the route below.
+		@realtime_blocked path {$REALTIME_PREFIX}/api/tenants {$REALTIME_PREFIX}/api/tenants/* {$REALTIME_PREFIX}/api/openapi {$REALTIME_PREFIX}/api/openapi/*
+		handle @realtime_blocked {
+			header Content-Type "application/json"
+			respond `{"error":"forbidden","message":"Access is forbidden."}` 403
+		}
+
+		# realtime-v1-api-protected -> realtime:4000/api/*
+		# REST API: gets translation + Authorization synthesis.
+		@realtime_api path {$REALTIME_PREFIX}/api {$REALTIME_PREFIX}/api/*
+		handle @realtime_api {
+			route {
+				uri strip_prefix {$REALTIME_PREFIX}
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				reverse_proxy realtime:4000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$REALTIME_PREFIX}/api
+				}
+			}
+		}
+
+		# realtime-v1-ws-protected -> realtime:4000/socket/*
+		# WebSocket and longpoll: query translation + X-Api-Key mirror. NO Authorization synthesis here (Realtime reads X-Api-Key first).
+		# /realtime/v1/websocket -> /socket/websocket
+		# /realtime/v1/longpoll  -> /socket/longpoll
+		# /realtime/v1/...       -> /socket/...
+		handle_path {$REALTIME_PREFIX}/* {
+			route {
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				import translate_apikey_header
+				import translate_apikey_query
+				import mirror_x_api_key
+				import api_rate_limit
+				rewrite * /socket{uri}
+				reverse_proxy realtime:4000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$REALTIME_PREFIX}/
+				}
+			}
+		}
+
+		# ============================================================
+		# BYPASS routes (service handles its own auth)
+		# ============================================================
+
+		# storage-v1 -> storage:5000/*
+		# Storage authenticates internally (asymmetric JWT or AWS SigV4). The gateway translates apikey when it is a known sb_*/internal asymmetric JWTs/legacy value but never rejects on missing apikey (S3 presigned URLs carry no header). AWS SigV4 Authorization headers are left untouched (see the DELIBERATE DIVERGENCE comment on the synth_authorization snippet). Storage requires X-Forwarded-Prefix for S3 SigV4 verification and TUS Location URL construction; storage env must set REQUEST_ALLOW_X_FORWARDED_PATH=true for it to be honoured.
+		handle_path {$STORAGE_PREFIX}/* {
+			route {
+				import apikey_from_query
+				import api_key_lookup
+				import translate_apikey_query
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				reverse_proxy storage:5000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$STORAGE_PREFIX}
+				}
+			}
+		}
+
+		# functions-v1 -> functions:9000/*
+		# Edge Runtime handles its own auth; pass apikey and Authorization through untouched. The translation chain is fully skipped here, the same way Envoy skips it on /functions/v1/.
+		handle_path {$FUNCTIONS_PREFIX}/* {
+			route {
+				import api_rate_limit
+				reverse_proxy functions:9000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$FUNCTIONS_PREFIX}/
+				}
+			}
+		}
+
+		# ============================================================
+		# OPTIONAL routes (commented for parity — uncomment to enable)
+		# ============================================================
+
+		# pg-protected -> postgres-meta:8080/* (service_role only)
+		# Mirrors Envoy's RBAC rule that limits /pg/ to the service_role principal. Add the `postgres-meta` service to compose.yml first.
+		#
+		# handle_path /pg/* {
+		# 	route {
+		# 		import apikey_from_query
+		# 		import api_key_lookup
+		# 		import reject_invalid_apikey
+		# 		@not_service_role not vars {_role} "service_role"
+		# 		handle @not_service_role {
+		# 			header Content-Type "application/json"
+		# 			respond `{"message":"Forbidden"}` 403
+		# 		}
+		# 		import translate_apikey_header
+		# 		import synth_authorization
+		# 		import api_rate_limit
+		# 		reverse_proxy postgres-meta:8080 {
+		# 			import forwarded_headers
+		# 			header_up X-Forwarded-Prefix /pg/
+		# 		}
+		# 	}
+		# }
+
+		# mcp-blocker / mcp -> studio:3000/api/mcp
+		# DENY by default in Envoy/Kong. Uncomment together with the studio service if you want to expose the MCP endpoint locally; review https://supabase.com/docs/guides/self-hosting/enable-mcp first.
+		#
+		# @mcp_paths path /api/mcp /api/mcp/* /mcp /mcp/*
+		# handle @mcp_paths {
+		# 	header Content-Type "application/json"
+		# 	respond `{"error":"forbidden","message":"Access is forbidden."}` 403
+		# }
+
+		# dashboard (catch-all) -> studio:3000/* (HTTP basic auth)
+		# Mirrors Envoy's catch-all `/` -> studio route with basic auth and inbound `Authorization` stripped. Add the `studio` service to compose.yml and define STUDIO_BASIC_AUTH_USER / STUDIO_BASIC_AUTH_PASSWORD_HASH in .env first. Place this block as the LAST handle (above the fallback) — it must not shadow the API routes above.
+		#
+		# handle {
+		# 	basicauth {
+		# 		{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_PASSWORD_HASH}
+		# 	}
+		# 	request_header -Authorization
+		# 	reverse_proxy studio:3000 {
+		# 		import forwarded_headers
+		# 	}
+		# }
+
+		# ============================================================
+		# Custom: Realtime admin dashboard at /admin/*
+		# ============================================================
+		handle {$REALTIME_DASHBOARD_PREFIX}/* {
+			reverse_proxy realtime:4000 {
+				import forwarded_headers
+			}
+		}
+
+		# ============================================================
+		# Fallback 404
+		# ============================================================
+		handle {
+			header Content-Type "application/json"
+			respond `{"error":"not_found","message":"The requested resource does not exist."}` 404
+		}
+	}
+}
