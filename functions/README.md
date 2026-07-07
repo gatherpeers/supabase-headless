@@ -1,60 +1,62 @@
 # Edge Functions
 
-Deno functions on [`supabase/edge-runtime`](https://github.com/supabase/edge-runtime), fronted by Caddy at `/functions/v1/*`.
+Functions run on [supabase/edge-runtime](https://github.com/supabase/edge-runtime) and are exposed by Caddy at `/functions/v1/*`.
 
-## Request flow
+This repository uses a small custom loader instead of one compose service per function. The loader in [index.ts](./index.ts) discovers function directories, validates the requested function name, and dispatches requests to Edge Runtime workers.
 
+## Request Flow
+
+```text
+Caddy -> functions:9000 -> functions/index.ts -> per-function worker
 ```
-Caddy → functions:9000 → functions/index.ts (main loader) → per-function worker
-```
 
-[index.ts](./index.ts) parses the first URL segment as the function name, validates `[a-zA-Z0-9_-]+`, and dispatches via `EdgeRuntime.userWorkers.create()`. Workers are reused (`forceCreate: false`); retired workers are recreated on `WorkerAlreadyRetired`.
+`index.ts` parses the first URL segment as the function name, accepts only `[a-zA-Z0-9_-]+`, excludes `_shared` and dot-directories, and serves directories that contain `index.ts` or `index.js`.
+
+Workers are reused with `forceCreate: false`. If a worker has already retired, the loader retries with a fresh worker.
 
 ## Layout
 
-```
+```text
 functions/
-├── index.ts           # Main loader (required)
-├── _shared/           # Not routed
-│   ├── supabase.ts
+├── index.ts           # Main loader
+├── _shared/           # Shared helpers, not routable
+│   ├── json.ts
 │   ├── requireEnv.ts
-│   └── json.ts
+│   └── supabase.ts
 ├── example1/
 │   └── index.ts
 └── example2/
     └── index.ts
 ```
 
-Any directory with `index.ts` or `index.js` is served at `/functions/v1/<name>/`. `_shared` and dot-directories are excluded.
+Any directory with an entrypoint is served at `/functions/v1/<name>/`.
 
-## Worker limits
+Examples:
 
-| Setting | Value |
-| --- | --- |
-| Memory | 150 MB |
-| Wall timeout | 5 min |
-| CPU soft / hard | 10 s / 20 s |
-| Module cache | enabled |
+- `/functions/v1/example1/foo` routes to `example1`.
+- `/functions/v1/_shared` returns `404`.
+- `/functions/v1/missing` returns `404`.
 
-## Routing examples
+## Worker Limits
 
-```
-/functions/v1/example1/foo  →  example1
-/functions/v1/_shared       →  404 (excluded)
-/functions/v1/missing       →  404 (no entrypoint)
-```
+- Memory: `150 MB`
+- Wall timeout: `5 min`
+- CPU soft limit: `10 s`
+- CPU hard limit: `20 s`
+- Module cache: enabled
 
-## Internal endpoints
+These limits live in [index.ts](./index.ts).
 
-- `GET /_internal/health` — container healthcheck
-- `GET /_internal/metric` — runtime metrics
+## Internal Endpoints
 
-## Writing a function
+- `GET /_internal/health`: Docker healthcheck.
+- `GET /_internal/metric`: Edge Runtime metrics.
 
-1. Create `functions/<name>/index.ts` with `Deno.serve(...)`.
-2. Redeploy is automatic (volume mount); restart the container if workers cache stale code.
+These endpoints are for container-internal use. Caddy blocks `/functions/v1/_internal*` so they are not exposed through the public API domain.
 
-### Public handler
+## Writing A Function
+
+Create `functions/<name>/index.ts` and call `Deno.serve(...)`.
 
 ```ts
 import { json } from '../_shared/json.ts'
@@ -62,11 +64,17 @@ import { json } from '../_shared/json.ts'
 Deno.serve(() => json({ ok: true }))
 ```
 
-### RLS-scoped (caller JWT)
+The functions directory is mounted read-only into the container. During development, a changed file may still be cached by a live worker; restart `functions` when you need a clean reload.
+
+## Authorization Patterns
+
+Functions are gateway-auth bypass routes. Caddy forwards requests to Edge Runtime without enforcing `apikey`, so **each function must decide whether it is public, caller-scoped, or admin-only.**
+
+Caller-scoped RLS client:
 
 ```ts
-import { createRlsClient } from '../_shared/supabase.ts'
 import { json } from '../_shared/json.ts'
+import { createRlsClient } from '../_shared/supabase.ts'
 
 Deno.serve(async (req) => {
   let supabase
@@ -75,53 +83,53 @@ Deno.serve(async (req) => {
   } catch {
     return json({ msg: 'Unauthorized' }, 401)
   }
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return json({ msg: 'Unauthorized' }, 401)
+
   return json({ user })
 })
 ```
 
-### Service role (bypass RLS)
+Service-role client:
 
 ```ts
 import { createAdminClient } from '../_shared/supabase.ts'
 
-Deno.serve(async (req) => {
-  // Add your own authorization before using admin client.
+Deno.serve(async () => {
+  // Add application-specific authorization before bypassing RLS.
   const supabase = createAdminClient()
   // ...
 })
 ```
 
-## Shared helpers (`_shared/`)
+Never use the service-role client for a public handler without an authorization check.
 
-| Export | Purpose |
-| --- | --- |
-| `createRlsClient(req)` | Client with caller's `Authorization` header; RLS enforced |
-| `createAdminClient()` | Service-role client; bypasses RLS |
-| `createPublicUrlClient()` | `SUPABASE_PUBLIC_URL` only — for `storage.getPublicUrl()` |
-| `requireEnv(name)` | Fail fast on missing env |
-| `json(body, status?)` | JSON response helper |
+## Shared Helpers
 
-`SUPABASE_URL` is `http://gateway` so traffic stays on `private_net`. Use `createPublicUrlClient()` when the browser needs a public storage URL.
+- `createRlsClient(req)`: internal gateway URL plus caller `Authorization`; RLS is enforced by PostgREST.
+- `createAdminClient()`: internal gateway URL plus service role; bypasses RLS.
+- `createPublicUrlClient()`: public URL only, useful for `storage.getPublicUrl()`.
+- `requireEnv(name)`: fail fast on missing environment variables.
+- `json(body, statusOrInit)`: JSON response helper.
 
-## Environment (from `compose.yml`)
+`SUPABASE_URL` is `http://gateway`, so function-to-Supabase calls stay inside Docker networking. `storage.getPublicUrl()` is computed client-side by `supabase-js`; use `createPublicUrlClient()` when a function needs to return browser-facing Storage URLs.
 
-Forwarded to every worker:
+## Environment
 
-| Variable | Role |
-| --- | --- |
-| `SUPABASE_URL` | Internal gateway (`http://gateway`) |
-| `SUPABASE_PUBLIC_URL` | Public API base URL |
-| `SUPABASE_ANON_KEY` | Internal asymmetric anon JWT |
-| `SUPABASE_SERVICE_ROLE_KEY` | Internal asymmetric service JWT |
+[compose.yml](../compose.yml) defines these Supabase variables for the Functions container:
 
-Add more keys on the `functions` service in `compose.yml` as needed.
+- `SUPABASE_URL`: internal gateway URL, currently `http://gateway`.
+- `SUPABASE_PUBLIC_URL`: browser-facing API URL.
+- `SUPABASE_ANON_KEY`: internal asymmetric anon JWT.
+- `SUPABASE_SERVICE_ROLE_KEY`: internal asymmetric service-role JWT.
+
+The loader forwards the container environment to every worker. Add application-specific secrets only when every function in that container is allowed to see them, or split sensitive functions into a separate deployment.
 
 ## Dependencies
 
-Pinned in source, e.g. `npm:@supabase/supabase-js@2.110.0` in [_shared/supabase.ts](./_shared/supabase.ts). Bump via [MAINTENANCE.md](../MAINTENANCE.md).
+Deno imports are pinned in source, for example `npm:@supabase/supabase-js@2.110.0` in [_shared/supabase.ts](./_shared/supabase.ts). Follow [MAINTENANCE.md](../MAINTENANCE.md) when bumping versions.
 
 ## Tests
 
-Integration tests invoke `example1` and `example2`: [scripts/supabase-js](../scripts/supabase-js/).
+The SDK compatibility runner invokes [example1](./example1/index.ts) and [example2](./example2/index.ts) from [scripts/supabase-js](../scripts/supabase-js/).

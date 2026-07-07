@@ -347,6 +347,14 @@
 			}
 		}
 
+		# functions-v1-internal-blocked
+		# Keep Edge Runtime internals private. This must stay above the broader functions-v1 route below; compose healthchecks call functions:9000 directly.
+		@functions_internal path {$FUNCTIONS_PREFIX}/_internal {$FUNCTIONS_PREFIX}/_internal/*
+		handle @functions_internal {
+			header Content-Type "application/json"
+			respond `{"error":"not_found","message":"The requested resource does not exist."}` 404
+		}
+
 		# functions-v1 -> functions:9000/*
 		# Edge Runtime handles its own auth; pass apikey and Authorization through untouched. The translation chain is fully skipped here, the same way Envoy skips it on /functions/v1/.
 		handle_path {$FUNCTIONS_PREFIX}/* {

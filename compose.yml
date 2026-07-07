@@ -97,7 +97,7 @@ services:
   postgres-meta:
     image: supabase/postgres-meta:v0.96.6
     container_name: supabase-postgres-meta
-    profiles: ['dashboard']
+    profiles: ['meta']
     restart: always
     logging: *default-logging
     depends_on:

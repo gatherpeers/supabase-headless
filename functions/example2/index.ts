@@ -1,5 +1,5 @@
-import { createRlsClient } from '../_shared/supabase.ts'
 import { json } from '../_shared/json.ts'
+import { createRlsClient } from '../_shared/supabase.ts'
 
 console.info('example2 function started')
 
@@ -27,11 +27,11 @@ Deno.serve(async (req: Request) => {
     }
 
     return json({
-        id: user.id,
-        email: user.email ?? null
-      }, {
-        headers: { 'Connection': 'keep-alive' }
-      })
+      id: user.id,
+      email: user.email ?? null
+    }, {
+      headers: { 'Connection': 'keep-alive' },
+    })
   } catch (err) {
     return json({ error: 'Unexpected error' }, 500)
   }

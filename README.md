@@ -1,126 +1,184 @@
 # Supabase Headless
 
-Self-hosted [Supabase](https://supabase.com/) API stack without Studio, Supavisor, Analytics, or Logflare. Based on the [official Supabase Docker layout](https://github.com/supabase/supabase/tree/master/docker), with these project-specific choices:
+Supabase Headless is a small-footprint, self-hosted [Supabase](https://supabase.com/)-compatible API stack for teams that want the Supabase data plane without Studio, Analytics, Logflare, Vector, Supavisor, Kong, or Envoy.
 
-- **Caddy** as the only public entry (TLS, routing, rate limits, API-key translation).
-- **Plain SQL migrations** via a `db-migrate` sidecar with checksum tracking.
-- **Custom Edge Functions loader** (`functions/index.ts`) on `supabase/edge-runtime`.
-- **Postgres 18** custom image (PostGIS + wal2json).
+It keeps the core services that official [Supabase SDKs](https://supabase.com/docs/reference) talk to: Auth, PostgREST, Realtime, Storage, Image Transformation, and Edge Functions. The stack is intentionally operated as infrastructure-as-code: schema changes are plain SQL migrations, the gateway is a single [Caddy](https://caddyserver.com/) configuration, and application projects can vendor this repository as a Git submodule and mount their own migration/function overrides.
 
-## Component docs
+This is not an official Supabase distribution. It is a production-oriented custom compose stack based on the ideas in the [official Supabase Docker layout](https://github.com/supabase/supabase/tree/master/docker), while making different operational tradeoffs for single-tenant self-hosting.
 
-| Doc | Scope |
-| --- | --- |
-| [caddy/README.md](./caddy/README.md) | Gateway build, routes, API keys, CDN |
-| [db/README.md](./db/README.md) | Bootstrap, migrations, types, telemetry |
-| [functions/README.md](./functions/README.md) | Edge Functions loader and shared helpers |
-| [MAINTENANCE.md](./MAINTENANCE.md) | Pinning and upgrading dependencies |
-| [ROADMAP.md](./ROADMAP.md) | Planned operational work |
+## Why This Exists
 
-## Services
+The official self-hosted stack is designed to mirror the hosted platform and include a broad admin/dashboard experience. That is valuable, but it also brings services and configuration surface that some deployments do not need.
 
-| Service | Image / build | Role |
-| --- | --- | --- |
-| `gateway` | Caddy + caddy-ratelimit | Public HTTP(S), API-key translation |
-| `db` | PostGIS 18 + wal2json (custom) | PostgreSQL |
-| `db-migrate` | `postgres:18-alpine` | One-shot SQL migrations |
-| `auth` | `supabase/auth` | GoTrue |
-| `rest` | `postgrest/postgrest` | PostgREST |
-| `realtime` | `supabase/realtime` | WebSockets / Postgres Changes |
-| `storage` | `supabase/storage-api` | Storage API (S3-backed) |
-| `rustfs` | `rustfs/rustfs` | S3-compatible object store |
-| `rustfs-createbucket` | `rustfs/rc` | Creates the global bucket once |
-| `imgproxy` | `darthsim/imgproxy` | Image transforms for Storage |
-| `functions` | `supabase/edge-runtime` | Edge Functions |
-| `postgres-meta` | `supabase/postgres-meta` | Optional (`--profile dashboard`), type generation only |
+This repository takes the opposite position:
 
-Only `gateway` publishes host ports (`80`, `443`).
+- Keep the Supabase-compatible API surface that applications use.
+- Remove dashboard and analytics services from the runtime path.
+- Replace Kong/Envoy with Caddy for TLS, routing, rate limits, access logs, and API-key translation.
+- Use direct SQL migrations instead of dashboard-driven schema changes.
+- Keep private services on an internal Docker network with no host exposure.
+- Treat upstream Supabase services as modular building blocks that can be upgraded deliberately.
 
-## Networks
+The result is a smaller stack that is easier to inspect, cheaper to run, faster to update, and better suited to projects where database design lives in SQL and application repositories own their migrations.
 
-- **`private_net`** (`internal: true`) — database, APIs, object store, imgproxy. No internet egress.
-- **`public_net`** — `auth` (SMTP/OAuth), `functions` (outbound `fetch`), `gateway` (ACME).
+Read a little bit more about why I built this here: [Self-hosting: What's working (and what's not)?](https://github.com/orgs/supabase/discussions/39820#discussioncomment-16959184)
 
-All API traffic enters through `gateway`. Internal services are not exposed on the host.
+## Current-First Stack
 
-## First-time setup
+One of the goals is to keep the self-hosted stack close to current upstream releases. The official self-hosted bundle has a large surface area and can move slowly because many services, dashboard features, gateway layers, and analytics components must stay coordinated. This repository keeps the runtime smaller, so PostgreSQL and the Supabase service images can be reviewed, bumped, rebuilt, and tested more directly.
 
-### 1. Create `.env`
+The stack currently targets PostgreSQL 18 and recent Supabase service releases across Auth, Realtime, Storage, Edge Runtime, and Postgres Meta. Versions are still pinned in source and upgraded deliberately, not pulled from floating `latest` tags. See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow.
+
+## Compatibility Target
+
+The goal is compatibility with the official Supabase client SDKs for the enabled API services:
+
+- [@supabase/supabase-js](https://supabase.com/docs/reference/javascript/introduction) / [supabase-ssr](https://supabase.com/docs/guides/auth/server-side)
+- Auth user and admin APIs
+- PostgREST table, RPC, relationship, filter, and RLS behavior
+- Realtime channels, broadcast, presence, and Postgres changes
+- Storage buckets, object operations, signed URLs, public URLs, and image transforms
+- Edge Functions invoked through `/functions/v1/*`
+
+Compatibility does not mean feature parity with Supabase Cloud or Studio. This stack deliberately excludes Studio, dashboard-managed schema editing, Supavisor, Logflare, Vector, Analytics, and platform-specific operations.
+
+SDK coverage lives in `scripts/supabase-js` and should be run after dependency upgrades or gateway/auth changes.
+
+## Architecture
+
+Only `gateway` publishes host ports (`80`, `443`). Every public API request enters through Caddy.
+
+- `gateway`: [Caddy 2](https://caddyserver.com/) with [caddy-ratelimit](https://github.com/mholt/caddy-ratelimit); TLS, routing, CORS, rate limits, logs, API-key translation.
+- `db`: custom PostgreSQL 18 image with PostGIS, `wal2json`, and `pg_stat_statements`.
+- `db-migrate`: one-shot migration sidecar that applies stack SQL and app SQL with checksum tracking.
+- `auth`: [Supabase Auth / GoTrue](https://github.com/supabase/auth).
+- `rest`: [PostgREST](https://postgrest.org/).
+- `realtime`: Supabase Realtime.
+- `storage`: Supabase Storage API backed by S3-compatible RustFS.
+- `rustfs`: S3-compatible object storage.
+- `imgproxy`: image transformation backend for Storage.
+- `functions`: [Supabase Edge Runtime](https://github.com/supabase/edge-runtime) with a small custom function loader.
+- `postgres-meta`: optional [postgres-meta](https://github.com/supabase/postgres-meta) profile service used for TypeScript type generation only.
+
+
+
+## Network Model
+
+- `private_net` is `internal: true` and contains the database, REST API, Realtime, Storage, RustFS, imgproxy, and internal gateway reachability.
+- `public_net` is limited to services that need outbound internet: `gateway` for ACME, `auth` for SMTP/OAuth, and `functions` for user-code `fetch()`.
+
+Internal services are not published on the host. In production, the firewall should expose only `80`, `443`, and administrative access such as SSH.
+
+## Repository Docs
+
+- [caddy/README.md](./caddy/README.md): gateway behavior, routes, API-key translation, CORS, CDN notes.
+- [db/README.md](./db/README.md): bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules.
+- [functions/README.md](./functions/README.md): Edge Runtime loader, function layout, shared Supabase clients.
+- [MAINTENANCE.md](./MAINTENANCE.md): dependency pinning and upgrade workflow.
+- [ROADMAP.md](./ROADMAP.md): planned operational work and non-goals.
+
+
+
+## First-Time Setup
+
+Create `.env` from [.env.example](.env.example). See [CONFIG.md](https://github.com/supabase/supabase/blob/master/docker/CONFIG.md) for the official environment variables list.
 
 ```bash
 cp .env.example .env
 ```
 
-Variables wired in `compose.yml` are documented in `.env.example`. Optional GoTrue settings (SMTP, OAuth, mailer templates) are listed in the [upstream Supabase `.env.example`](https://github.com/supabase/supabase/blob/master/docker/.env.example) — add them to `auth.environment` in `compose.yml` when needed.
-
-### 2. Generate secrets
+Generate secrets:
 
 ```bash
 node generate-keys.mjs --update-env
 ```
 
-Without Node:
+Without Node on the host:
 
 ```bash
 docker run --rm -v "${PWD}:/work" -w /work node:24.16.0-alpine node generate-keys.mjs --update-env
 ```
 
-The script writes JWT/API keys and fills any empty infrastructure secrets (`POSTGRES_PASSWORD`, role passwords, `SECRET_KEY_BASE`, RustFS keys, etc.). Re-running rotates JWT/API material except `JWT_SECRET` (kept stable when already set). Infrastructure secrets are only generated when missing or empty.
+The script writes JWT/API keys and fills empty infrastructure secrets such as `POSTGRES_PASSWORD`, role passwords, `SECRET_KEY_BASE`, Realtime encryption keys, and RustFS credentials. Re-running rotates JWT/API material except `JWT_SECRET`, which is kept stable when already set. Infrastructure secrets are only generated when missing or empty.
 
-### 3. Start
+Start the stack:
 
 ```bash
 docker compose up -d
 ```
 
-Startup order: `db` and upstreams become healthy → `db-migrate` runs stack then app SQL → `gateway` starts after migrations succeed.
+Startup order is intentionally strict: `db` and upstream APIs become healthy, `db-migrate` applies stack then app SQL, and `gateway` starts only after migrations succeed.
 
-Add application schema under `db/app/migrations/` (see [db/README.md](./db/README.md)).
+## Vendoring In An App
+
+This repository is designed to be vendored into an application repository, for example as a Git submodule. The base stack owns platform wiring; the application owns project SQL and functions.
+
+Typical application-specific overrides:
+
+- Mount app migrations into `db/app/migrations`.
+- Mount app Edge Functions into `functions/`.
+- Override domains, SMTP/OAuth settings, CORS, resource limits, and storage policy through `.env` or compose overrides.
+- Keep stack migrations separate from app migrations so upstream compatibility fixes remain reviewable.
+
+Application schema belongs in numbered SQL files such as `db/app/migrations/001_create_profiles.sql`. Do not edit an applied migration file; add a new migration instead.
 
 ## Local HTTPS
 
-With `PUBLIC_API_DOMAIN=localhost`, Caddy uses a local CA. From the repo root:
+With `PUBLIC_API_DOMAIN=localhost`, Caddy uses a local CA. Export the root certificate from the repo root:
 
 ```bash
 docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt "$(pwd)/caddy-local-root.crt"
 ```
 
-Re-export after wiping `caddy_data`.
+Re-export the certificate after wiping `caddy_data`.
 
-- **Browsers** — import into the OS trust store (e.g. `certutil -user -addstore -f Root caddy-local-root.crt` on Windows), then restart the browser. `NODE_EXTRA_CA_CERTS` does not affect browsers.
-- **Node** — per session: `export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"`. Override any stale `setx` value if Node warns about a missing cert path.
+- Browsers: import `caddy-local-root.crt` into the OS trust store, then restart the browser. On Windows: `certutil -user -addstore -f Root caddy-local-root.crt`.
+- Node: set `NODE_EXTRA_CA_CERTS` for the session: `export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"`.
 
-## Realtime admin UI
+## Realtime Admin UI
 
-`https://<domain>/admin/dashboard` — credentials from `REALTIME_DASHBOARD_USER` and `REALTIME_DASHBOARD_PASSWORD`.
+Realtime exposes its own dashboard at:
 
-## SDK integration tests
+```text
+https://<domain>/admin/dashboard
+```
 
-With the stack running, from the repo root:
+Credentials come from `REALTIME_DASHBOARD_USER` and `REALTIME_DASHBOARD_PASSWORD`. This is not Supabase Studio.
+
+For internet-facing deployments, use a strong generated password and prefer an additional control such as VPN, IP allowlisting, or a private admin hostname. The route is convenient for operations but should be treated as an admin surface.
+
+## SDK Integration Tests
+
+With the stack running:
 
 ```bash
 docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt "$(pwd)/caddy-local-root.crt"
 export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"
-cd scripts/supabase-js && npm install && npm test
+cd scripts/supabase-js
+npm install
+npm test
 ```
 
-Uses repo-root `.env`.
+The runner uses the repo-root `.env`, creates temporary `sdk_test_*` database objects and buckets, exercises SDK methods, then tears them down.
 
-## Production notes
+## Production Checklist
 
-- Turn off `GOTRUE_MAILER_AUTOCONFIRM` when using real email verification.
-- On Linux, set `userland-proxy: false` in `/etc/docker/daemon.json` if Caddy binds host ports 80/443 directly (preserves client IPs).
-- Open only 80/443 (and SSH) on the firewall.
-- Behind a CDN, configure `trusted_proxies` in the Caddyfile ([caddy/README.md](./caddy/README.md)).
-- Never edit an applied migration file — checksums are enforced ([db/README.md](./db/README.md#production-rules)).
+- Use real SMTP/OAuth settings and turn off auto-confirm flows when email verification matters.
+- Configure `trusted_proxies` in [caddy/Caddyfile](./caddy/Caddyfile) when running behind a CDN or load balancer.
+- On Linux, consider Docker `userland-proxy: false` so Caddy can preserve real client IPs on host ports.
+- Back up Postgres and RustFS volumes before dependency or schema upgrades.
+- Keep `JWT_SECRET`, `JWT_KEYS`, `JWT_JWKS`, and API keys stable unless intentionally rotating credentials. `SUPABASE_SECRET_KEY` is server-only and maps to `service_role`.
+- Run `scripts/supabase-js` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
+- Never edit an applied migration file; checksum mismatches intentionally block startup.
+- Review upstream Supabase release notes before bumping service images.
 
-## Useful commands
+## Useful Commands
 
 ```bash
 docker compose logs -f --tail=100
 docker compose down
-docker compose --profile dashboard up -d postgres-meta   # only when generating types
+docker compose --profile meta up -d postgres-meta
 docker compose --profile "*" pull && docker compose build
 ```
 
-See [MAINTENANCE.md](./MAINTENANCE.md) for upgrade workflow and [Docker's CLI reference](https://docs.docker.com/reference/cli/docker/) for pruning and diagnostics.
+See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow and [db/README.md](./db/README.md) for migration rules.
