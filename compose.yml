@@ -423,8 +423,10 @@ services:
       start_period: 15s
 
   functions:
-    image: supabase/edge-runtime:v1.74.2
-    container_name: supabase-functions
+    build:
+      context: ./functions
+      dockerfile: Dockerfile
+    container_name: supabase-edge-functions
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -445,8 +447,7 @@ services:
       # SUPABASE_PUBLISHABLE_KEYS:
       # SUPABASE_SECRET_KEYS:
     volumes:
-      - ./functions:/home/deno/functions:ro
-    command: start --main-service /home/deno/functions
+      - ./functions/app:/home/deno/functions:ro
     networks:
       - private_net
       - public_net

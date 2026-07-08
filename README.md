@@ -61,7 +61,7 @@ Only `gateway` publishes host ports (`80`, `443`). Every public API request ente
 - `storage`: Supabase Storage API backed by S3-compatible RustFS.
 - `rustfs`: S3-compatible object storage.
 - `imgproxy`: image transformation backend for Storage.
-- `functions`: [Supabase Edge Runtime](https://github.com/supabase/edge-runtime) with a small custom function loader.
+- `functions`: [Supabase Edge Runtime](https://github.com/supabase/edge-runtime) with a custom loader image and an `app/` bind mount for routable functions.
 - `postgres-meta`: optional [postgres-meta](https://github.com/supabase/postgres-meta) profile service used for TypeScript type generation only.
 
 ## Network Model
@@ -114,7 +114,7 @@ This repository is designed to be vendored into an application repository, for e
 Typical application-specific overrides:
 
 - Mount app migrations into `db/app/migrations`.
-- Mount app Edge Functions into `functions/`.
+- Mount app Edge Functions into `functions/app` (or replace that mount with your own function tree).
 - Override domains, SMTP/OAuth settings, CORS, resource limits, and storage policy through `.env` or compose overrides.
 - Keep stack migrations separate from app migrations so upstream compatibility fixes remain reviewable.
 

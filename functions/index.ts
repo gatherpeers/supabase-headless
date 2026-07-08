@@ -10,6 +10,7 @@ if (globalThis[Symbol.for('opentelemetry.js.api.1')]) {
 }
 
 const FUNCTIONS_ROOT = '/home/deno/functions'
+const DENO_CONFIG_PATH = '/srv/functions-loader/deno.json'
 const FUNCTION_NAME_RE = /^[a-zA-Z0-9_-]+$/
 const ENTRYPOINT_FILES = ['index.ts', 'index.js']
 const EXCLUDED_FUNCTION_DIRS = ['_shared', '.']
@@ -108,6 +109,7 @@ Deno.serve(async (req: Request) => {
       cpuTimeSoftLimitMs: 10_000,
       cpuTimeHardLimitMs: 20_000,
       context: {
+        importMapPath: DENO_CONFIG_PATH,
         useReadSyncFileAPI: true,
         otel: otelAttributes,
       },
@@ -156,7 +158,7 @@ async function logLoadedFunctions() {
       if (await functionExists(entry.name)) functionNames.push(entry.name)
     }
 
-    console.log(`Loaded ${functionNames.length} function(s): ${functionNames.join(', ')}`)
+    console.log(`Loaded ${functionNames.length} function(s): ${functionNames.join(', ') || '(none)'}`)
   } catch (err) {
     console.error('Error reading functions directory:', err)
   }

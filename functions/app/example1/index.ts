@@ -1,4 +1,4 @@
-import { json } from '../_shared/json.ts'
+import { json } from '@stack/json.ts'
 
 console.info('example1 function started')
 

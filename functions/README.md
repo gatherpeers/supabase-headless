@@ -2,12 +2,12 @@
 
 Functions run on [supabase/edge-runtime](https://github.com/supabase/edge-runtime) and are exposed by Caddy at `/functions/v1/*`.
 
-This repository uses a small custom loader instead of one compose service per function. The loader in [index.ts](./index.ts) discovers function directories, validates the requested function name, and dispatches requests to Edge Runtime workers.
+This repository uses a small custom loader instead of one compose service per function. The loader in [index.ts](./index.ts) is baked into the functions image, discovers directories under [app/](./app/), validates the requested function name, and dispatches requests to Edge Runtime workers.
 
 ## Request Flow
 
 ```text
-Caddy -> functions:9000 -> functions/index.ts -> per-function worker
+Caddy -> functions:9000 -> loader (image) -> per-function worker (app mount)
 ```
 
 `index.ts` parses the first URL segment as the function name, accepts only `[a-zA-Z0-9_-]+`, excludes `_shared` and dot-directories, and serves directories that contain `index.ts` or `index.js`.
@@ -18,24 +18,72 @@ Workers are reused with `forceCreate: false`. If a worker has already retired, t
 
 ```text
 functions/
-├── index.ts           # Main loader
-├── _shared/           # Shared helpers, not routable
+├── Dockerfile         # Bakes loader + stack _shared into the image
+├── index.ts           # Main loader (image)
+├── deno.json          # @stack and @shared import aliases for workers
+├── _shared/           # Stack helpers (image), not routable
 │   ├── json.ts
 │   ├── requireEnv.ts
 │   └── supabase.ts
-├── example1/
-│   └── index.ts
-└── example2/
-    └── index.ts
+└── app/               # Bind-mounted routable functions
+    ├── _shared/       # Optional app-only helpers (not routable)
+    ├── example1/
+    │   └── index.ts
+    └── example2/
+        └── index.ts
 ```
 
-Any directory with an entrypoint is served at `/functions/v1/<name>/`.
+Only [app/](./app/) is mounted into the container. The loader and stack `_shared` helpers ship in the image so vendored apps can mount their own function tree without copying platform code.
+
+Any directory with an entrypoint under `app/` is served at `/functions/v1/<name>/`.
 
 Examples:
 
 - `/functions/v1/example1/foo` routes to `example1`.
 - `/functions/v1/_shared` returns `404`.
 - `/functions/v1/missing` returns `404`.
+
+## Vendoring
+
+Mount application functions into `functions/` from a compose override:
+
+```yaml
+services:
+  functions:
+    volumes: !override
+      - ./functions:/home/deno/functions:ro
+```
+
+The vendor tree only needs function folders and an optional `_shared/` directory:
+
+```text
+my-app/supabase/functions/
+├── checkout-webhook/
+│   └── index.ts
+└── _shared/
+    └── billing.ts
+```
+
+Rebuild the functions image when upgrading the stack submodule to pick up loader or `@stack` helper updates:
+
+```bash
+docker compose build functions
+docker compose up -d functions
+```
+
+## Import Aliases
+
+Workers resolve shared code through [deno.json](./deno.json):
+
+- `@stack/`: stack helpers baked into the image
+- `@shared/`: optional helpers from `_shared/` on the mount (e.g. `functions/_shared/` in your app repo)
+
+```ts
+import { json } from '@stack/json.ts'
+import { billCustomer } from '@shared/billing.ts' // Just an example
+```
+
+Do not mount over stack `_shared`. Extend behavior through `@shared/` or local files inside the function directory.
 
 ## Worker Limits
 
@@ -56,15 +104,15 @@ These endpoints are for container-internal use. Caddy blocks `/functions/v1/_int
 
 ## Writing A Function
 
-Create `functions/<name>/index.ts` and call `Deno.serve(...)`.
+Create `functions/app/<name>/index.ts` and call `Deno.serve(...)`.
 
 ```ts
-import { json } from '../_shared/json.ts'
+import { json } from '@stack/json.ts'
 
 Deno.serve(() => json({ ok: true }))
 ```
 
-The functions directory is mounted read-only into the container. During development, a changed file may still be cached by a live worker; restart `functions` when you need a clean reload.
+The app directory is mounted read-only into the container. During development, a changed file may still be cached by a live worker; restart `functions` when you need a clean reload.
 
 ## Authorization Patterns
 
@@ -73,8 +121,8 @@ Functions are gateway-auth bypass routes. Caddy forwards requests to Edge Runtim
 Caller-scoped RLS client:
 
 ```ts
-import { json } from '../_shared/json.ts'
-import { createRlsClient } from '../_shared/supabase.ts'
+import { json } from '@stack/json.ts'
+import { createRlsClient } from '@stack/supabase.ts'
 
 Deno.serve(async (req) => {
   let supabase
@@ -94,7 +142,7 @@ Deno.serve(async (req) => {
 Service-role client:
 
 ```ts
-import { createAdminClient } from '../_shared/supabase.ts'
+import { createAdminClient } from '@stack/supabase.ts'
 
 Deno.serve(async () => {
   // Add application-specific authorization before bypassing RLS.
@@ -132,4 +180,4 @@ Deno imports are pinned in source, for example `npm:@supabase/supabase-js@2.110.
 
 ## Tests
 
-The SDK compatibility runner invokes [example1](./example1/index.ts) and [example2](./example2/index.ts) from [scripts/supabase-js](../scripts/supabase-js/).
+The SDK compatibility runner invokes [example1](./app/example1/index.ts) and [example2](./app/example2/index.ts) from [scripts/supabase-js](../scripts/supabase-js/).

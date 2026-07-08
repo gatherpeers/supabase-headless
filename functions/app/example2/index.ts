@@ -1,5 +1,5 @@
-import { json } from '../_shared/json.ts'
-import { createRlsClient } from '../_shared/supabase.ts'
+import { json } from '@stack/json.ts'
+import { createRlsClient } from '@stack/supabase.ts'
 
 console.info('example2 function started')
 

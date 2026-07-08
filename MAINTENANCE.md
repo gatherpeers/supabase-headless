@@ -83,7 +83,8 @@ docker compose build db gateway
 docker compose up -d
 
 # Function import changes
-docker compose restart functions
+docker compose build functions
+docker compose up -d functions
 ```
 
 ## Release Checklist
