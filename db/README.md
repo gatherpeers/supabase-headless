@@ -124,6 +124,41 @@ The script starts [postgres-meta](https://github.com/supabase/postgres-meta) und
 
 Keep `POSTGREST_VERSION` in [types-gen-ts.sh](./types-gen-ts.sh) aligned with the `rest` image tag in [compose.yml](../compose.yml).
 
+## Connection Budget
+
+Postgres runs with `max_connections=100` (`POSTGRES_MAX_CONNECTIONS`) and no external pooler. After the 3 connections reserved for superusers (`superuser_reserved_connections`), about **97** are usable. Each database-backed service keeps its own connection pool, so the sum of those pools must stay comfortably under that limit.
+
+Every pool is bounded by an environment variable with a conservative default:
+
+| Service    | Env var                 | Default | Notes                                                    |
+| ---------- | ----------------------- | ------- | -------------------------------------------------------- |
+| `rest`     | `PGRST_DB_POOL`         | 20      | PostgREST, connects as `authenticator`.                  |
+| `auth`     | `AUTH_DB_POOL_SIZE`     | 10      | GoTrue. Upstream default is `0` (unlimited) — capped here. |
+| `storage`  | `STORAGE_DB_POOL_SIZE`  | 15      | storage-api. Upstream default is `20`.                   |
+| `realtime` | `REALTIME_DB_POOL_SIZE` | 5       | RLS authorization pool; add ~1 for broadcast replication. |
+
+Steady-state usage is therefore roughly **51** connections. The remaining headroom absorbs transient and optional users that are not part of the pools above:
+
+- `db-migrate`: short-lived `psql` at startup (postgres user), then exits.
+- `postgres-meta`: only runs under the `meta` compose profile.
+- `functions`: reaches the database through the gateway/PostgREST, so it holds no direct pool.
+- Manual `psql`, monitoring, and admin sessions.
+
+If you raise any pool size, raise `POSTGRES_MAX_CONNECTIONS` to match (and give the `db` container more memory), or introduce a connection pooler such as PgBouncer or Supavisor (see [ROADMAP.md](../ROADMAP.md)).
+
+## Memory Tuning
+
+Defaults are sized for the 2G `db` container limit set in [compose.yml](../compose.yml):
+
+| Env var                          | Default  | Purpose                                                                 |
+| -------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `POSTGRES_SHARED_BUFFERS`        | `256MB`  | Dedicated cache. Deliberately conservative (~12% of 2G) for small deployments. |
+| `POSTGRES_EFFECTIVE_CACHE_SIZE`  | `1536MB` | Planner hint for total cache (~75% of the limit); not an allocation.    |
+| `POSTGRES_MAINTENANCE_WORK_MEM`  | `128MB`  | Memory for `VACUUM`, `CREATE INDEX`, and similar maintenance.           |
+| `POSTGRES_WORK_MEM`              | `6MB`    | Per-sort/hash operation memory; multiplied across concurrent operations. |
+
+If you give the container more memory, raise `POSTGRES_SHARED_BUFFERS` toward ~25% of the limit (for example `512MB`) and `POSTGRES_EFFECTIVE_CACHE_SIZE` to ~75%. Keep `POSTGRES_WORK_MEM` modest, since it applies per operation and scales with the connection budget above.
+
 ## Telemetry
 
 Slow query logging is controlled by `POSTGRES_LOG_MIN_DURATION_STATEMENT` and defaults to `200` ms. Query statistics are available through `extensions.pg_stat_statements`.

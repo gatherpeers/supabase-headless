@@ -23,6 +23,8 @@ services:
       postgres
       -c port=${POSTGRES_PORT:-5432}
       -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1536MB}
+      -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
       -c max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
       -c wal_level=logical
       -c max_replication_slots=10
@@ -129,6 +131,8 @@ services:
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${AUTH_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}?sslmode=disable
+      # Explicit pool cap. Upstream default is 0 (unlimited); bound it so it fits the Postgres connection budget (see db/README.md).
+      GOTRUE_DB_MAX_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-10}
 
       # /auth/v1 prefix included -> GoTrue emits OAuth callbacks, SAML endpoints and email links under the gateway's auth path (custom OAuth providers work out of the box, SAML SSO lives at /auth/v1/sso/saml/*).
       API_EXTERNAL_URL: ${PUBLIC_API_URL}${AUTH_PREFIX}
@@ -182,6 +186,8 @@ services:
       DB_NAME: ${POSTGRES_DB:-postgres}
       DB_USER: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Authorization (RLS check) pool. Realtime also opens ~1 connection for broadcast-from-database replication; budget accordingly (see db/README.md).
+      DB_POOL_SIZE: ${REALTIME_DB_POOL_SIZE:-5}
 
       DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime, extensions, public"
       DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
@@ -369,6 +375,8 @@ services:
       PGRST_JWT_SECRET: ${JWT_JWKS}
       JWT_JWKS: ${JWT_JWKS}
       DATABASE_URL: postgres://supabase_storage_admin:${STORAGE_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      # Explicit pool cap (upstream default is 20). Keep it within the Postgres connection budget (see db/README.md).
+      DATABASE_MAX_CONNECTIONS: ${STORAGE_DB_POOL_SIZE:-15}
       STORAGE_BACKEND: s3
       GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET:-supabase-global}
       GLOBAL_S3_ENDPOINT: http://rustfs:9000
