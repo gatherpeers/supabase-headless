@@ -97,19 +97,7 @@ cp .env.example .env
 node generate-keys.mjs --update-env
 ```
 
-Without Node on the host:
-
-```bash
-docker run --rm -v "${PWD}:/work" -w /work node:24.16.0-alpine node generate-keys.mjs --update-env
-```
-
-The script writes JWT/API keys and fills empty infrastructure secrets such as `POSTGRES_PASSWORD`, role passwords, `SECRET_KEY_BASE`, Realtime encryption keys, and RustFS credentials. Every variable — JWT/API keys and infrastructure secrets alike — is only generated when missing or empty, so re-running is safe and never rotates already-set values (existing keys are preserved). To deliberately rotate the entire JWT/API group (fresh EC signing key, asymmetric JWTs, and `sb_*` keys), pass `--rotate`:
-
-```bash
-node generate-keys.mjs --update-env
-```
-
-Rotating invalidates every distributed client key and every asymmetric-signed session, so only use `--rotate` when you intend to rotate credentials. `JWT_SECRET` is kept stable when already set, even during a rotation.
+The [generate-keys.mjs](generate-keys.mjs) script writes JWT/API keys and fills empty infrastructure secrets such as `POSTGRES_PASSWORD`, role passwords, `SECRET_KEY_BASE`, Realtime encryption keys, and RustFS credentials. Every variable — JWT/API keys and infrastructure secrets alike — is only generated when missing or empty, so re-running is safe and never rotates already-set values (existing keys are preserved). To deliberately rotate the entire JWT/API group (fresh EC signing key, asymmetric JWTs, and `sb_*` keys), pass `--rotate`. Rotating invalidates every distributed client key and every asymmetric-signed session, so only use `node generate-keys.mjs --update-env --rotate` when you intend to rotate credentials. `JWT_SECRET` is kept stable when already set, even during a rotation.
 
 ### Start
 
@@ -220,6 +208,8 @@ docker compose logs -f --tail=100
 docker compose down
 docker compose --profile meta up -d postgres-meta
 docker compose --profile "*" pull && docker compose build
+# Run Node commands in a container
+docker run --rm node:24-alpine node -v
 ```
 
 See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow and [db/README.md](./db/README.md) for migration rules.
