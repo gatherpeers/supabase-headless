@@ -356,6 +356,7 @@ services:
       IMGPROXY_USE_ETAG: "true"
       IMGPROXY_AUTO_WEBP: "true"
       AWS_S3_FORCE_PATH_STYLE: "true"
+      # Reachable only from private_net (not exposed publicly). `IMGPROXY_KEY` and `IMGPROXY_SALT` aren't defined thus produce a warning, omit safely
     networks:
       - private_net
     healthcheck:
