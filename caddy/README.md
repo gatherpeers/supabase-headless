@@ -33,8 +33,9 @@ Storage and Functions intentionally do not require a gateway API-key check. Stor
 
 - `/auth/v1/verify`, `/auth/v1/callback`, `/auth/v1/authorize`, and `/auth/v1/.well-known/jwks.json` -> `auth:9999`, open.
 - `/.well-known/oauth-authorization-server` -> `auth:9999`, open.
-- `/sso/saml/*` -> `auth:9999`, open.
+- `/auth/v1/sso/saml/acs`, `/auth/v1/sso/saml/metadata` -> `auth:9999`, open.
 - `/auth/v1/*` -> `auth:9999`, API key required.
+- `/rest/v1`, `/rest/v1/` (OpenAPI spec root) -> `rest:3000`, `service_role` only (anon/publishable get `403`); mirrors [supabase/supabase#45462](https://github.com/supabase/supabase/pull/45462).
 - `/rest/v1/*` -> `rest:3000`, API key required.
 - `/graphql/v1/*` -> `rest:3000/rpc/graphql`, API key required; requires the `graphql` schema to exist.
 - `/realtime/v1/api/tenants*` and `/realtime/v1/api/openapi*` -> blocked with `403`.

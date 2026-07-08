@@ -29,6 +29,8 @@ One of the goals is to keep the self-hosted stack close to current upstream rele
 
 The stack currently targets PostgreSQL 18 and recent Supabase service releases across Auth, Realtime, Storage, Edge Runtime, and Postgres Meta. Versions are still pinned in source and upgraded deliberately, not pulled from floating `latest` tags. See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow.
 
+Track upstream changes through the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md). It is the source of truth for breaking changes, security fixes, and configuration updates that this repository mirrors (adapted to the Caddy gateway and the trimmed-down service set).
+
 ## Compatibility Target
 
 The goal is compatibility with the official Supabase client SDKs for the enabled API services:
@@ -203,7 +205,7 @@ The runner uses the repo-root `.env`, creates temporary `sdk_test_*` database ob
 - Keep `JWT_SECRET`, `JWT_KEYS`, `JWT_JWKS`, and API keys stable unless intentionally rotating credentials. `SUPABASE_SECRET_KEY` is server-only and maps to `service_role`.
 - Run `scripts/supabase-js` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
 - Never edit an applied migration file; checksum mismatches intentionally block startup.
-- Review upstream Supabase release notes before bumping service images.
+- Review the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) and upstream release notes before bumping service images.
 
 ## Useful Commands
 

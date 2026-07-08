@@ -130,7 +130,8 @@ services:
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${AUTH_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}?sslmode=disable
 
-      API_EXTERNAL_URL: ${PUBLIC_API_URL}
+      # /auth/v1 prefix included -> GoTrue emits OAuth callbacks, SAML endpoints and email links under the gateway's auth path (custom OAuth providers work out of the box, SAML SSO lives at /auth/v1/sso/saml/*).
+      API_EXTERNAL_URL: ${PUBLIC_API_URL}${AUTH_PREFIX}
       GOTRUE_SITE_URL: ${APP_URL}
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST}
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
@@ -240,7 +241,7 @@ services:
         condition: service_healthy
     environment:
       PGRST_DB_URI: postgres://${PGRST_AUTH_USER:-authenticator}:${PGRST_AUTH_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
-      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,storage}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE:-anon}
       PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
 

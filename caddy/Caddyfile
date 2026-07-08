@@ -205,12 +205,14 @@
 
 		# auth-v1-open-sso-acs      -> auth:9999/sso/saml/acs
 		# auth-v1-open-sso-metadata -> auth:9999/sso/saml/metadata
-		@sso_saml path /sso/saml/acs /sso/saml/acs/* /sso/saml/metadata /sso/saml/metadata/*
+		# supabase/supabase#47640 moved the SAML SSO endpoints under the /auth/v1 prefix (was /sso/saml/*), following the new API_EXTERNAL_URL that includes /auth/v1. The auth container still serves these at its root /sso/saml/*, so strip the prefix before proxying and advertise it back via X-Forwarded-Prefix. These stay OPEN (no apikey): the IdP posts the SAML assertion to /acs and fetches /metadata without a Supabase key.
+		@sso_saml path {$AUTH_PREFIX}/sso/saml/acs {$AUTH_PREFIX}/sso/saml/acs/* {$AUTH_PREFIX}/sso/saml/metadata {$AUTH_PREFIX}/sso/saml/metadata/*
 		handle @sso_saml {
+			uri strip_prefix {$AUTH_PREFIX}
 			import api_rate_limit
 			reverse_proxy auth:9999 {
 				import forwarded_headers
-				header_up X-Forwarded-Prefix {path}
+				header_up X-Forwarded-Prefix {$AUTH_PREFIX}
 			}
 		}
 
@@ -230,6 +232,30 @@
 				reverse_proxy auth:9999 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix {$AUTH_PREFIX}/
+				}
+			}
+		}
+
+		# rest-v1-openapi-protected -> rest:3000/ (service_role/admin only)
+		# supabase/supabase#45462 (discussion #42949): the PostgREST OpenAPI spec served at the /rest/v1/ root is now restricted to admin credentials. anon/publishable keys (and legacy anon) get 403; a missing/invalid key still gets 401 via reject_invalid_apikey. Actual Data API traffic (/rest/v1/<table>, /rest/v1/rpc/*) is handled by the route below and is unaffected. MUST stay above rest-v1-protected to win source-order matching. Matches both /rest/v1 and /rest/v1/ so neither variant can leak the spec.
+		@rest_openapi_root path {$REST_PREFIX} {$REST_PREFIX}/
+		handle @rest_openapi_root {
+			route {
+				import apikey_from_query
+				import api_key_lookup
+				import reject_invalid_apikey
+				@rest_not_service_role not vars {_role} "service_role"
+				handle @rest_not_service_role {
+					header Content-Type "application/json"
+					respond `{"message":"Forbidden"}` 403
+				}
+				import translate_apikey_header
+				import synth_authorization
+				import api_rate_limit
+				rewrite * /
+				reverse_proxy rest:3000 {
+					import forwarded_headers
+					header_up X-Forwarded-Prefix {$REST_PREFIX}/
 				}
 			}
 		}
