@@ -149,7 +149,9 @@
 		}
 	}
 
-	# Default response headers
+	# CORS for all API responses (env: CORS_ALLOWED_ORIGIN, default *).
+	# Wildcard "*" is fine for supabase-js: auth is apikey/JWT in headers, and Access-Control-Allow-Credentials is not sent.
+	# If that credentials header is ever added here, or the browser uses fetch(..., { credentials: 'include' }), switch * to one concrete origin.
 	header {
 		defer
 		Access-Control-Allow-Origin "{$CORS_ALLOWED_ORIGIN}"

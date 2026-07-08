@@ -58,7 +58,7 @@ Commented optional routes in [Caddyfile](./Caddyfile) include `/pg/*` for `postg
 
 CORS is controlled by `CORS_ALLOWED_ORIGIN`, emitted verbatim as `Access-Control-Allow-Origin` on every response.
 
-The default is **unquoted** `*`, matching upstream Supabase (Envoy/Kong and the hosted platform). This is safe here because the auth boundary is the `apikey`/JWT (and RLS), not the request origin, and the gateway sends no `Access-Control-Allow-Credentials`, so no cookies are involved. A wildcard origin without credentials only lets browser JS *attempt* a call — it still needs a valid key and token to succeed.
+The default is **unquoted** `*`, matching upstream Supabase (Envoy/Kong and the hosted platform). This is safe here because the auth boundary is the `apikey`/JWT (and RLS), not the request origin, and the gateway sends no `Access-Control-Allow-Credentials`, so no cookies are involved. A wildcard origin without credentials only lets browser JS *attempt* a call — it still needs a valid key and token to succeed. See the comment above `Access-Control-Allow-Origin` in [Caddyfile](./Caddyfile): if you ever enable credentialed CORS on the gateway or use `credentials: 'include'` from the browser, replace `*` with a single origin.
 
 Options:
 
