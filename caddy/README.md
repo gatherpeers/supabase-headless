@@ -2,6 +2,8 @@
 
 `gateway` is the only public entry point for the stack. It replaces the upstream Kong/Envoy gateway with a single Caddy configuration that handles TLS, route matching, prefix rewrites, CORS, sliding-window rate limits, access logs, and Supabase API-key translation.
 
+> For reference, the official Supabase gateway config (Kong and Envoy) lives in [supabase/supabase `docker/volumes/api`](https://github.com/supabase/supabase/tree/master/docker/volumes/api).
+
 Path prefixes are configurable in `.env` (`AUTH_PREFIX`, `REST_PREFIX`, `REALTIME_PREFIX`, `STORAGE_PREFIX`, `FUNCTIONS_PREFIX`). Defaults match the conventional Supabase paths.
 
 ## Build
