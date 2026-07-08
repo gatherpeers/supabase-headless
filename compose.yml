@@ -13,6 +13,8 @@ services:
     logging: *default-logging
     container_name: supabase-db
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     deploy:
       resources:
         limits:
@@ -67,6 +69,8 @@ services:
     image: postgres:18.4-alpine
     container_name: supabase-db-migrate
     restart: "no"
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       db:
         condition: service_healthy
@@ -100,6 +104,8 @@ services:
     container_name: supabase-postgres-meta
     profiles: ['meta']
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     logging: *default-logging
     depends_on:
       db:
@@ -122,6 +128,8 @@ services:
     logging: *default-logging
     container_name: supabase-auth
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       db:
         condition: service_healthy
@@ -167,6 +175,8 @@ services:
     logging: *default-logging
     container_name: supabase-realtime
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     deploy:
       resources:
         limits:
@@ -242,6 +252,8 @@ services:
     logging: *default-logging
     container_name: supabase-rest
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       db:
         condition: service_healthy
@@ -302,6 +314,8 @@ services:
     image: rustfs/rc:v0.1.25
     container_name: supabase-rustfs-createbucket
     restart: "no"
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       rustfs:
         condition: service_healthy
@@ -317,6 +331,8 @@ services:
     image: darthsim/imgproxy:v4.0.11
     container_name: supabase-imgproxy
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       rustfs:
         condition: service_healthy
@@ -354,6 +370,8 @@ services:
     logging: *default-logging
     container_name: supabase-storage
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     depends_on:
       db:
         condition: service_healthy
@@ -407,6 +425,8 @@ services:
     image: supabase/edge-runtime:v1.74.2
     container_name: supabase-functions
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     logging: *default-logging
     depends_on:
       db:
@@ -443,6 +463,8 @@ services:
     logging: *default-logging
     container_name: supabase-gateway
     restart: always
+    security_opt:
+      - "no-new-privileges:true"
     # Expose :80/:443 only after upstreams and app SQL migrations are ready.
     depends_on:
       db-migrate:
