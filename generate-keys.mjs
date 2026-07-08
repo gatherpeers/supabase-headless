@@ -6,13 +6,20 @@
  *   - default (no flag): print KEY='value' lines to stdout. Single-quoted so a terminal that wraps long lines on copy still produces a parseable .env entry (godotenv / Compose / Node accept multi-line single-quoted values).
  *   - `--update-env`: surgically rewrite variables in `.env` in place, replacing any existing definition (including ones that span multiple lines from a previous bad paste) and appending the rest.
  *
- * Idempotency:
- *   - JWT/API keys: `JWT_SECRET` is reused when already set; everything else in that group is regenerated each run (rotates EC keys, asymmetric JWTs, sb_* keys).
- *   - Infrastructure secrets: generated only when missing or empty (safe to re-run without rotating DB/S3 passwords).
+ * Idempotency (safe to re-run — nothing is silently rotated):
+ *   - JWT/API keys: every variable in this group is generated only when missing or empty.
+ *     Existing values are preserved. When some (but not all) are missing, the existing EC
+ *     signing key from `JWT_KEYS` is reused so newly-filled asymmetric values stay coherent
+ *     with the already-shipped ones.
+ *   - Infrastructure secrets: generated only when missing or empty (never rotates DB/S3 passwords).
  *
- * Optional env (when invoking Node): `PROJECT_REF_FOR_KEYS` — salt for opaque-key checksums (default: supabase-headless).
+ * Rotation (opt-in): pass `--rotate` to force-regenerate the ENTIRE JWT/API group — a fresh EC
+ *     keypair, asymmetric JWTs, sb_* keys, and legacy HS256 keys. `JWT_SECRET` is still reused
+ *     when already set. This invalidates every distributed client key and every asymmetric-signed
+ *     session, so only use it when you intend to rotate credentials.
  *
  * Run locally:                  `node generate-keys.mjs --update-env`
+ * Force rotation:               `node generate-keys.mjs --update-env --rotate`
  * Print only (no .env touch):   `node generate-keys.mjs`
  * Host without Node (e.g. VPS): `docker run --rm -v "${PWD}:/work" -w /work node:24.16.0-alpine node generate-keys.mjs --update-env`
  */
@@ -22,9 +29,15 @@ import fs from 'node:fs'
 
 const ENV_FILE = '.env'
 const updateEnv = process.argv.includes('--update-env')
+const rotate = process.argv.includes('--rotate')
 
 if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE)
-const { JWT_SECRET, PROJECT_REF_FOR_KEYS } = process.env
+const { JWT_SECRET } = process.env
+
+/** Whether a variable is already set to a non-blank value in the loaded environment. */
+function present(key) {
+	return typeof process.env[key] === 'string' && process.env[key].trim() !== ''
+}
 
 /** @param {number} bytes */
 function randomHex(bytes) {
@@ -72,25 +85,52 @@ function signHS256(secret, payload) {
 	return `${data}.${sig}`
 }
 
-function generateOpaqueKey(prefix, projectRef) {
+function generateOpaqueKey(prefix) {
 	const random = crypto.randomBytes(17).toString('base64url').slice(0, 22)
 	const intermediate = prefix + random
-	const checksum = crypto
-		.createHash('sha256')
-		.update(`${projectRef}|${intermediate}`)
-		.digest('base64url')
-		.slice(0, 8)
+	const checksum = crypto.createHash('sha256').update(intermediate).digest('base64url').slice(0, 8)
 	return `${intermediate}_${checksum}`
 }
 
-function buildJwtMaterial() {
+/**
+ * Reconstruct the EC signing key + kid from an existing `JWT_KEYS` value so that
+ * only-if-missing fills can sign new asymmetric tokens that verify against the
+ * already-published JWKS. Returns null when unavailable or unparseable.
+ */
+function loadExistingEcKey() {
+	const raw = process.env.JWT_KEYS?.trim()
+	if (!raw) return null
+	try {
+		const keys = JSON.parse(raw)
+		const ec = Array.isArray(keys) ? keys.find((k) => k?.kty === 'EC' && k?.d) : null
+		if (!ec) return null
+		const privateKey = crypto.createPrivateKey({
+			key: { kty: 'EC', crv: ec.crv, x: ec.x, y: ec.y, d: ec.d },
+			format: 'jwk',
+		})
+		return { privateKey, kid: ec.kid || crypto.randomUUID() }
+	} catch {
+		return null
+	}
+}
+
+/** @param {boolean} forceRotate when true, always mint a fresh EC keypair (ignores existing) */
+function buildJwtMaterial(forceRotate) {
 	const jwtSecret = JWT_SECRET?.trim() || crypto.randomBytes(30).toString('base64')
 	const jwtSecretOrigin = JWT_SECRET?.trim() ? 'reused from .env' : 'newly generated'
-	const projectRef = PROJECT_REF_FOR_KEYS?.trim() || 'supabase-headless'
 
-	const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' })
+	const existing = forceRotate ? null : loadExistingEcKey()
+	const ecKeyOrigin = existing ? 'reused from .env' : 'newly generated'
+	let privateKey
+	let kid
+	if (existing) {
+		privateKey = existing.privateKey
+		kid = existing.kid
+	} else {
+		;({ privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }))
+		kid = crypto.randomUUID()
+	}
 	const jwk = privateKey.export({ format: 'jwk' })
-	const kid = crypto.randomUUID()
 
 	const octKey = {
 		kty: 'oct',
@@ -136,6 +176,7 @@ function buildJwtMaterial() {
 
 	return {
 		jwtSecretOrigin,
+		ecKeyOrigin,
 		material: {
 			JWT_SECRET: jwtSecret,
 			JWT_KEYS: JSON.stringify(jwtKeys),
@@ -152,8 +193,8 @@ function buildJwtMaterial() {
 				iat,
 				exp,
 			}),
-			SUPABASE_PUBLISHABLE_KEY: generateOpaqueKey('sb_publishable_', projectRef),
-			SUPABASE_SECRET_KEY: generateOpaqueKey('sb_secret_', projectRef),
+			SUPABASE_PUBLISHABLE_KEY: generateOpaqueKey('sb_publishable_'),
+			SUPABASE_SECRET_KEY: generateOpaqueKey('sb_secret_'),
 			ANON_KEY: signHS256(jwtSecret, { role: 'anon', iss: 'supabase', iat, exp }),
 			SERVICE_ROLE_KEY: signHS256(jwtSecret, { role: 'service_role', iss: 'supabase', iat, exp }),
 		},
@@ -171,6 +212,49 @@ function buildFillSecrets() {
 		filledKeys.push(key)
 	}
 	return { material, filledKeys }
+}
+
+/**
+ * Decide which freshly-built JWT/API values to actually write.
+ *   - `--rotate`: write the whole group (full rotation).
+ *   - default: only write variables that are currently missing or blank; keep existing values.
+ * Also surfaces coherence warnings for partially-present groups that cannot be reconciled
+ * without a rotation.
+ */
+function selectJwtMaterial(fullMaterial, forceRotate) {
+	if (forceRotate) {
+		return { material: { ...fullMaterial }, filledKeys: Object.keys(fullMaterial), keptKeys: [], warnings: [] }
+	}
+
+	/** @type {Record<string, string>} */
+	const material = {}
+	/** @type {string[]} */
+	const filledKeys = []
+	/** @type {string[]} */
+	const keptKeys = []
+	for (const [key, value] of Object.entries(fullMaterial)) {
+		if (present(key)) {
+			keptKeys.push(key)
+			continue
+		}
+		material[key] = value
+		filledKeys.push(key)
+	}
+
+	/** @type {string[]} */
+	const warnings = []
+	const asymDerived = ['JWT_JWKS', 'ANON_KEY_ASYMMETRIC', 'SERVICE_ROLE_KEY_ASYMMETRIC']
+	if (!present('JWT_KEYS') && asymDerived.some(present)) {
+		warnings.push(
+			'JWT_KEYS is missing while other asymmetric values exist. A NEW signing key was generated to fill it, so it will NOT match the existing asymmetric tokens/JWKS. Re-run with --rotate to regenerate the whole group coherently.'
+		)
+	}
+	if (!present('JWT_SECRET') && (present('ANON_KEY') || present('SERVICE_ROLE_KEY'))) {
+		warnings.push(
+			'JWT_SECRET is missing while legacy HS256 keys (ANON_KEY/SERVICE_ROLE_KEY) exist. A NEW JWT_SECRET was generated, so those existing keys will no longer verify. Re-run with --rotate to regenerate them.'
+		)
+	}
+	return { material, filledKeys, keptKeys, warnings }
 }
 
 // `.env` line classifier: a line that starts a variable assignment (KEY=...) or a comment, or is empty. Anything else is treated as a continuation line of a previous (bad-paste) multi-line value and skipped on replace.
@@ -201,9 +285,26 @@ function replaceOrAppend(content, key, value) {
 	return out.join('\n')
 }
 
-const { jwtSecretOrigin, material: jwtMaterial } = buildJwtMaterial()
+const { jwtSecretOrigin, ecKeyOrigin, material: fullJwtMaterial } = buildJwtMaterial(rotate)
+const {
+	material: jwtMaterial,
+	filledKeys: jwtFilledKeys,
+	warnings: jwtWarnings,
+} = selectJwtMaterial(fullJwtMaterial, rotate)
 const { material: fillMaterial, filledKeys } = buildFillSecrets()
 const generated = { ...jwtMaterial, ...fillMaterial }
+
+for (const warning of jwtWarnings) console.warn(`WARNING: ${warning}`)
+
+const jwtMsg = rotate
+	? `rotated ${jwtFilledKeys.length} JWT/API variable(s) (JWT_SECRET ${jwtSecretOrigin}, EC key ${ecKeyOrigin})`
+	: jwtFilledKeys.length > 0
+		? `filled ${jwtFilledKeys.length} missing JWT/API variable(s): ${jwtFilledKeys.join(', ')} (JWT_SECRET ${jwtSecretOrigin}, EC key ${ecKeyOrigin})`
+		: 'all JWT/API variables already set (skipped)'
+const fillMsg =
+	filledKeys.length > 0
+		? `filled ${filledKeys.length} infrastructure secret(s): ${filledKeys.join(', ')}`
+		: 'all infrastructure secrets already set (skipped)'
 
 if (updateEnv) {
 	let content = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf8') : ''
@@ -211,26 +312,31 @@ if (updateEnv) {
 		content = replaceOrAppend(content, key, value)
 	}
 	fs.writeFileSync(ENV_FILE, content)
-	const jwtCount = Object.keys(jwtMaterial).length
-	const fillMsg =
-		filledKeys.length > 0
-			? `filled ${filledKeys.length} infrastructure secret(s): ${filledKeys.join(', ')}`
-			: 'all infrastructure secrets already set (skipped)'
-	console.log(
-		`Updated ${ENV_FILE}: rewrote ${jwtCount} JWT/API variables (JWT_SECRET ${jwtSecretOrigin}), ${fillMsg}. Restart the stack with: docker compose down && docker compose up -d`
-	)
+	const restartNote =
+		Object.keys(generated).length > 0
+			? ' Restart the stack with: docker compose down && docker compose up -d'
+			: ' No values changed.'
+	console.log(`Updated ${ENV_FILE}: ${jwtMsg}, ${fillMsg}.${restartNote}`)
 } else {
 	const lines = Object.entries(generated).map(([key, value]) => `${key}='${value}'`)
+	const jwtNote = rotate
+		? 'JWT/API material was fully rotated on this run (--rotate).'
+		: jwtFilledKeys.length > 0
+			? `Generated ${jwtFilledKeys.length} JWT/API variable(s) that were missing or empty. Pass --rotate to regenerate the whole group.`
+			: 'All JWT/API variables were already set in .env (not regenerated). Pass --rotate to force rotation.'
 	const fillNote =
 		filledKeys.length > 0
 			? `Generated ${filledKeys.length} infrastructure secret(s) that were missing or empty.`
 			: 'All infrastructure secrets were already set in .env (not regenerated).'
+	const body =
+		lines.length > 0
+			? `Copy the values below into your .env file.\n`
+			: 'Nothing to copy — all values are already present.\n'
 	console.log(`
 # ----------------------
-Copy the values below into your .env file.
-
+${body}
 JWT_SECRET was ${jwtSecretOrigin}.
-JWT/API material was generated freshly on this run.
+${jwtNote}
 ${fillNote}
 # ----------------------
 
