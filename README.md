@@ -192,7 +192,10 @@ The runner uses the repo-root `.env`, creates temporary `sdk_test_*` database ob
 
 ## Production Checklist
 
+- Review the official [Supabase self-hosted `CONFIG.md`](https://github.com/supabase/supabase/blob/master/docker/CONFIG.md) and each service's upstream env reference, then add/remove/adjust variables in your production `.env` and [compose.yml](./compose.yml) to match the version and features you run. In particular, the Auth (GoTrue) container is configured entirely via `GOTRUE_*` env vars ([auth env readme reference](https://github.com/supabase/auth#configuration) and [auth env reference](https://github.com/supabase/auth/blob/master/example.env)); some options may not be in `CONFIG.md`, so check the auth repo for the version you run.
+- Read `.env` in depth before deploying; do not trust generated defaults. Many values must be changed to align with each service (domains, URLs, secrets, SMTP/OAuth, log levels, and service-specific settings).
 - Use real SMTP/OAuth settings and turn off auto-confirm flows when email verification matters.
+- Set `CADDY_CONTACT_EMAIL` to a real address with a public `PUBLIC_API_DOMAIN`; it becomes the Let's Encrypt registration email (used for expiry/revocation notices). The `admin@localhost` default only suits the local CA.
 - Configure `trusted_proxies` in [caddy/Caddyfile](./caddy/Caddyfile) when running behind a CDN or load balancer.
 - On Linux, consider Docker `userland-proxy: false` so Caddy can preserve real client IPs on host ports.
 - Back up Postgres and RustFS volumes before dependency or schema upgrades.
