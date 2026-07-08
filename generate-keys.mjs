@@ -44,9 +44,14 @@ function randomHex(bytes) {
 	return crypto.randomBytes(bytes).toString('hex')
 }
 
-/** Same as `openssl rand -base64 48` (48 random bytes, base64-encoded). */
-function randomBase6448() {
-	return crypto.randomBytes(48).toString('base64')
+/**
+ * Phoenix `secret_key_base` for Realtime. Phoenix requires >= 64 bytes and uses the
+ * value as raw bytes (KDF seed), so 64 random bytes give full entropy with margin above
+ * the floor. base64url output is .env/Compose-safe: only [A-Za-z0-9_-], no spaces, no
+ * +/= that could need quoting or break on copy/paste.
+ */
+function randomSecretKeyBase() {
+	return crypto.randomBytes(64).toString('base64url')
 }
 
 /**
@@ -58,7 +63,7 @@ const FILL_SECRETS = [
 	{ key: 'AUTH_DB_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'STORAGE_DB_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'PGRST_AUTH_PASSWORD', generate: () => randomHex(32) },
-	{ key: 'SECRET_KEY_BASE', generate: () => randomBase6448() },
+	{ key: 'SECRET_KEY_BASE', generate: () => randomSecretKeyBase() },
 	{ key: 'REALTIME_DB_ENC_KEY', generate: () => randomHex(8) },
 	{ key: 'REALTIME_DASHBOARD_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'RUSTFS_ACCESS_KEY', generate: () => randomHex(20) },
