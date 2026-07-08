@@ -343,7 +343,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.63.1
+    image: supabase/storage-api:v1.64.0
     logging: *default-logging
     container_name: supabase-storage
     restart: always
