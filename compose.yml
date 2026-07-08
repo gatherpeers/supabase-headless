@@ -224,8 +224,8 @@ services:
     networks:
       - private_net
     healthcheck:
-      # Tenant /health validates the legacy HS256 anon JWT. ES256 ANON_KEY_ASYMMETRIC returns 403.
-      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://127.0.0.1:4000/api/tenants/${PUBLIC_API_DOMAIN}/health"]
+      # Unauthenticated liveness probe (PageController :healthcheck route, no auth pipeline; returns 200 "ok"). Avoids the tenant /health endpoint, whose :api pipeline only accepts an HS256 token signed by JWT_SECRET (i.e. the legacy ANON_KEY) — there is no JWKS/ES256 path — so legacy keys stay optional. DB readiness is gated separately via depends_on db: service_healthy.
+      test: ["CMD-SHELL", "curl -sSf -o /dev/null http://127.0.0.1:4000/healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
