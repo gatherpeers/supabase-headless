@@ -56,9 +56,14 @@ Commented optional routes in [Caddyfile](./Caddyfile) include `/pg/*` for `postg
 
 ## CORS
 
-CORS is controlled by `CORS_ALLOWED_ORIGIN`. The default in `.env.example` points to `APP_URL`.
+CORS is controlled by `CORS_ALLOWED_ORIGIN`, emitted verbatim as `Access-Control-Allow-Origin` on every response.
 
-Use a concrete origin in production. A wildcard origin is convenient for local experiments but is usually the wrong default for authenticated browser apps.
+The default is **unquoted** `*`, matching upstream Supabase (Envoy/Kong and the hosted platform). This is safe here because the auth boundary is the `apikey`/JWT (and RLS), not the request origin, and the gateway sends no `Access-Control-Allow-Credentials`, so no cookies are involved. A wildcard origin without credentials only lets browser JS *attempt* a call — it still needs a valid key and token to succeed.
+
+Options:
+
+- **`*`** (default): any browser origin may call the API with bearer tokens. Matches upstream.
+- **A single concrete origin** (e.g. `${APP_URL}`): a mild hardening that also blocks other browser origins at the CORS layer. No `Vary: Origin` is needed because the emitted origin is static.
 
 ## Auth Email Templates
 
