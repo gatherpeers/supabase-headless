@@ -60,8 +60,6 @@ Only `gateway` publishes host ports (`80`, `443`). Every public API request ente
 - `functions`: [Supabase Edge Runtime](https://github.com/supabase/edge-runtime) with a small custom function loader.
 - `postgres-meta`: optional [postgres-meta](https://github.com/supabase/postgres-meta) profile service used for TypeScript type generation only.
 
-
-
 ## Network Model
 
 - `private_net` is `internal: true` and contains the database, REST API, Realtime, Storage, RustFS, imgproxy, and internal gateway reachability.
@@ -76,8 +74,6 @@ Internal services are not published on the host. In production, the firewall sho
 - [functions/README.md](./functions/README.md): Edge Runtime loader, function layout, shared Supabase clients.
 - [MAINTENANCE.md](./MAINTENANCE.md): dependency pinning and upgrade workflow.
 - [ROADMAP.md](./ROADMAP.md): planned operational work and non-goals.
-
-
 
 ## First-Time Setup
 
@@ -132,8 +128,33 @@ docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt "$(pwd)/cad
 
 Re-export the certificate after wiping `caddy_data`.
 
-- Browsers: import `caddy-local-root.crt` into the OS trust store, then restart the browser. On Windows: `certutil -user -addstore -f Root caddy-local-root.crt`.
-- Node: set `NODE_EXTRA_CA_CERTS` for the session: `export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"`.
+- **Browsers** — import `caddy-local-root.crt` into the OS trust store, then restart the browser. `NODE_EXTRA_CA_CERTS` does not affect browsers.
+
+  On Windows:
+
+  ```bash
+  certutil -user -addstore -f Root caddy-local-root.crt
+  ```
+
+- **Node** — set `NODE_EXTRA_CA_CERTS` for the current shell session (Bash, Git Bash, WSL, macOS, Linux):
+
+  ```bash
+  export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"
+  ```
+
+  On Windows, for the current PowerShell session only:
+
+  ```powershell
+  $env:NODE_EXTRA_CA_CERTS = "$PWD\caddy-local-root.crt"
+  ```
+
+  To persist across new terminals on Windows, use an absolute path with `setx` (it does not expand `$(pwd)`). Replace the path with your repo location:
+
+  ```bat
+  setx NODE_EXTRA_CA_CERTS "D:\path\to\supabase-headless\caddy-local-root.crt"
+  ```
+
+  Open a new terminal after `setx`. Remove or update the variable if you move the repo or wipe `caddy_data` and re-export the cert.
 
 ## Realtime Admin UI
 
