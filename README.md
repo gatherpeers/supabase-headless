@@ -44,6 +44,8 @@ Compatibility does not mean feature parity with Supabase Cloud or Studio. This s
 
 SDK coverage lives in `scripts/supabase-js` and should be run after dependency upgrades or gateway/auth changes.
 
+---
+
 ## Architecture
 
 Only `gateway` publishes host ports (`80`, `443`). Every public API request enters through Caddy.
@@ -75,7 +77,11 @@ Internal services are not published on the host. In production, the firewall sho
 - [MAINTENANCE.md](./MAINTENANCE.md): dependency pinning and upgrade workflow.
 - [ROADMAP.md](./ROADMAP.md): planned operational work and non-goals.
 
+---
+
 ## First-Time Setup
+
+### Environment
 
 Create `.env` from [.env.example](.env.example). See [CONFIG.md](https://github.com/supabase/supabase/blob/master/docker/CONFIG.md) for the official environment variables list.
 
@@ -83,7 +89,7 @@ Create `.env` from [.env.example](.env.example). See [CONFIG.md](https://github.
 cp .env.example .env
 ```
 
-Generate secrets:
+### Secrets
 
 ```bash
 node generate-keys.mjs --update-env
@@ -97,7 +103,7 @@ docker run --rm -v "${PWD}:/work" -w /work node:24.16.0-alpine node generate-key
 
 The script writes JWT/API keys and fills empty infrastructure secrets such as `POSTGRES_PASSWORD`, role passwords, `SECRET_KEY_BASE`, Realtime encryption keys, and RustFS credentials. Re-running rotates JWT/API material except `JWT_SECRET`, which is kept stable when already set. Infrastructure secrets are only generated when missing or empty.
 
-Start the stack:
+### Start
 
 ```bash
 docker compose up -d
@@ -128,33 +134,39 @@ docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt "$(pwd)/cad
 
 Re-export the certificate after wiping `caddy_data`.
 
-- **Browsers** — import `caddy-local-root.crt` into the OS trust store, then restart the browser. `NODE_EXTRA_CA_CERTS` does not affect browsers.
+### Browsers
 
-  On Windows:
+Import `caddy-local-root.crt` into the OS trust store, then restart the browser. `NODE_EXTRA_CA_CERTS` does not affect browsers.
 
-  ```bash
-  certutil -user -addstore -f Root caddy-local-root.crt
-  ```
+On Windows:
 
-- **Node** — set `NODE_EXTRA_CA_CERTS` for the current shell session (Bash, Git Bash, WSL, macOS, Linux):
+```bash
+certutil -user -addstore -f Root caddy-local-root.crt
+```
 
-  ```bash
-  export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"
-  ```
+### Node (current session)
 
-  On Windows, for the current PowerShell session only:
+Bash, Git Bash, WSL, macOS, or Linux:
 
-  ```powershell
-  $env:NODE_EXTRA_CA_CERTS = "$PWD\caddy-local-root.crt"
-  ```
+```bash
+export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"
+```
 
-  To persist across new terminals on Windows, use an absolute path with `setx` (it does not expand `$(pwd)`). Replace the path with your repo location:
+PowerShell (current session only):
 
-  ```bat
-  setx NODE_EXTRA_CA_CERTS "D:\path\to\supabase-headless\caddy-local-root.crt"
-  ```
+```powershell
+$env:NODE_EXTRA_CA_CERTS = "$PWD\caddy-local-root.crt"
+```
 
-  Open a new terminal after `setx`. Remove or update the variable if you move the repo or wipe `caddy_data` and re-export the cert.
+### Node (persistent on Windows)
+
+`setx` does not expand `$(pwd)`. Replace the path with your repo location:
+
+```bat
+setx NODE_EXTRA_CA_CERTS "D:\path\to\supabase-headless\caddy-local-root.crt"
+```
+
+Open a new terminal after `setx`. Remove or update the variable if you move the repo or wipe `caddy_data` and re-export the cert.
 
 ## Realtime Admin UI
 
@@ -170,17 +182,17 @@ For internet-facing deployments, use a strong generated password and prefer an a
 
 ## SDK Integration Tests
 
-With the stack running:
+With the stack running. When `PUBLIC_API_DOMAIN=localhost`, complete [Local HTTPS](#local-https) first.
 
 ```bash
-docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt "$(pwd)/caddy-local-root.crt"
-export NODE_EXTRA_CA_CERTS="$(pwd)/caddy-local-root.crt"
 cd scripts/supabase-js
 npm install
 npm test
 ```
 
 The runner uses the repo-root `.env`, creates temporary `sdk_test_*` database objects and buckets, exercises SDK methods, then tears them down.
+
+---
 
 ## Production Checklist
 
