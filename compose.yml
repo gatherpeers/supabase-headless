@@ -18,22 +18,22 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2G
-    shm_size: ${DB_SHM_SIZE:-1GB}
+          cpus: ${DB_CPU_LIMIT:-4.0}
+          memory: ${DB_MEMORY_LIMIT:-4G}
+    shm_size: ${DB_SHM_SIZE:-2GB}
     command: >
       postgres
       -c port=${POSTGRES_PORT:-5432}
-      -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
-      -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1536MB}
-      -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
+      -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
+      -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
       -c max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
       -c wal_level=logical
       -c max_replication_slots=10
       -c max_slot_wal_keep_size=4GB
       -c max_wal_senders=10
       -c log_min_messages=fatal
-      -c work_mem=${POSTGRES_WORK_MEM:-6MB}
+      -c work_mem=${POSTGRES_WORK_MEM:-32MB}
       -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-200}
       -c shared_preload_libraries='pg_stat_statements'
       -c pg_stat_statements.track=all

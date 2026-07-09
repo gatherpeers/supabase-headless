@@ -146,18 +146,42 @@ Steady-state usage is therefore roughly **51** connections. The remaining headro
 
 If you raise any pool size, raise `POSTGRES_MAX_CONNECTIONS` to match (and give the `db` container more memory), or introduce a connection pooler such as PgBouncer or Supavisor (see [ROADMAP.md](../ROADMAP.md)).
 
-## Memory Tuning
+## Memory And Resource Tuning
 
-Defaults are sized for the 2G `db` container limit set in [compose.yml](../compose.yml):
+Defaults target a **4 CPU / 4G** `db` container — enough headroom for PostGIS workloads while staying reasonable on a single host. All values are set in [compose.yml](../compose.yml) and overridable via `.env` (see [.env.example](../.env.example)).
 
-| Env var                          | Default  | Purpose                                                                 |
-| -------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `POSTGRES_SHARED_BUFFERS`        | `256MB`  | Dedicated cache. Deliberately conservative (~12% of 2G) for small deployments. |
-| `POSTGRES_EFFECTIVE_CACHE_SIZE`  | `1536MB` | Planner hint for total cache (~75% of the limit); not an allocation.    |
-| `POSTGRES_MAINTENANCE_WORK_MEM`  | `128MB`  | Memory for `VACUUM`, `CREATE INDEX`, and similar maintenance.           |
-| `POSTGRES_WORK_MEM`              | `6MB`    | Per-sort/hash operation memory; multiplied across concurrent operations. |
+### Container limits
 
-If you give the container more memory, raise `POSTGRES_SHARED_BUFFERS` toward ~25% of the limit (for example `512MB`) and `POSTGRES_EFFECTIVE_CACHE_SIZE` to ~75%. Keep `POSTGRES_WORK_MEM` modest, since it applies per operation and scales with the connection budget above.
+| Env var            | Default | Purpose                                                          |
+| ------------------ | ------- | ---------------------------------------------------------------- |
+| `DB_CPU_LIMIT`     | `4.0`   | Docker CPU cap for the `db` service.                             |
+| `DB_MEMORY_LIMIT`  | `4G`    | Docker memory cap for the `db` service.                          |
+| `DB_SHM_SIZE`      | `2GB`   | Container `/dev/shm`; should be ≥ `POSTGRES_SHARED_BUFFERS`.     |
+
+Changing CPU or memory limits requires recreating the container (`docker compose up -d --force-recreate db`). Postgres GUC changes take effect on the next DB restart.
+
+### PostgreSQL settings
+
+| Env var                             | Default | Purpose                                                                 |
+| ----------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `POSTGRES_SHARED_BUFFERS`           | `1GB`   | Dedicated buffer cache (~25% of the 4G limit).                          |
+| `POSTGRES_EFFECTIVE_CACHE_SIZE`     | `3GB`   | Planner hint for total cache (~75% of the limit); not an allocation.    |
+| `POSTGRES_MAINTENANCE_WORK_MEM`     | `512MB` | Memory for `VACUUM`, `CREATE INDEX`, and similar maintenance.           |
+| `POSTGRES_WORK_MEM`                 | `32MB`  | Per-sort/hash operation memory; multiplied across concurrent operations. |
+
+`POSTGRES_WORK_MEM` applies **per operation per connection**, not once globally. With the default connection budget (~51 pooled connections), a burst of concurrent sorts could theoretically request more than the container limit. The `32MB` default trades some safety margin for better PostGIS query performance; lower it (for example to `16MB`) if you see memory pressure under heavy parallel load.
+
+### Scaling down or up
+
+For a smaller host, lower `DB_CPU_LIMIT` and `DB_MEMORY_LIMIT` together and scale the Postgres settings in proportion:
+
+- `POSTGRES_SHARED_BUFFERS` → ~25% of `DB_MEMORY_LIMIT` (for example `256MB` on a 2G container).
+- `POSTGRES_EFFECTIVE_CACHE_SIZE` → ~75% of `DB_MEMORY_LIMIT`.
+- `POSTGRES_MAINTENANCE_WORK_MEM` → `128MB`–`256MB` on 2G; raise on larger containers.
+- `POSTGRES_WORK_MEM` → `6MB`–`16MB` on memory-constrained hosts.
+- `DB_SHM_SIZE` → at least `POSTGRES_SHARED_BUFFERS`, with headroom for parallel workers.
+
+If you raise any service pool size or `POSTGRES_MAX_CONNECTIONS`, revisit `POSTGRES_WORK_MEM` against the new connection budget.
 
 ## Telemetry
 
