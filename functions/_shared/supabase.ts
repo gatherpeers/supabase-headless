@@ -15,6 +15,10 @@ export function createRlsClient(req: Request): SupabaseClient {
           Authorization: authHeader
         },
       },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      },
     },
   )
 }
