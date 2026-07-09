@@ -279,7 +279,7 @@
 		}
 
 		# graphql-v1-protected -> rest:3000/rpc/graphql (with Content-Profile: graphql_public)
-		# Add the postgres-meta service and a `graphql` schema first; this is kept here for parity. pg_graphql is not part of the default custom stack but the route exists so it works the moment you enable it.
+		# Requires pg_graphql and a `graphql_public` schema first; this is kept here for parity. Neither is part of the default custom Postgres image, but the route exists so it works the moment you enable them.
 		@graphql path /graphql/v1 /graphql/v1/*
 		handle @graphql {
 			route {
