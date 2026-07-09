@@ -1,8 +1,10 @@
 # Database
 
-The database image is [postgres:18.4-trixie](https://hub.docker.com/_/postgres) with pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`. See [Dockerfile](./Dockerfile).
+PostgreSQL is the source of truth for this stack — not a dashboard. The database image is [postgres:18.4-trixie](https://hub.docker.com/_/postgres) with pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`. See [Dockerfile](./Dockerfile).
 
-The stack intentionally keeps database ownership in SQL. Bootstrap creates the platform roles and schemas; checksum-tracked migrations carry everything that must apply to existing volumes.
+Unlike the official self-hosted bundle's `supabase/postgres` image, this is a lean Postgres 18 build sized for the Headless data plane: the roles, schemas, and extensions Auth / PostgREST / Realtime / Storage need, without shipping the full Cloud extension suite (`pg_graphql`, `pg_cron`, Vault, and similar are not assumed). That keeps the image inspectable and upgradeable on a current major, at the cost of not mirroring every hosted Postgres feature out of the box.
+
+Schema ownership stays in SQL. Bootstrap creates the platform roles and schemas; checksum-tracked migrations carry everything that must apply to existing volumes. Edit an applied migration and startup fails — by design.
 
 ## Layout
 
@@ -69,6 +71,8 @@ CREATE POLICY profiles_owner ON public.profiles
 
 ## Migrations
 
+Migrations are the product surface for schema change. There is no Studio schema editor in this stack — your Git history is the change log.
+
 After `db`, `auth`, `rest`, `storage`, and `realtime` are healthy, `db-migrate` runs [migrate.sh](./migrate.sh):
 
 1. Apply `stack/schema.sql`.
@@ -78,7 +82,7 @@ After `db`, `auth`, `rest`, `storage`, and `realtime` are healthy, `db-migrate` 
 5. Record SHA-256 checksums in `stack_meta.migration_history` or `app_meta.migration_history`.
 6. Notify PostgREST to reload its schema cache.
 
-Each migration file runs in a single transaction together with its history row. A checksum mismatch on an already-applied file blocks startup by design.
+Each migration file runs in a single transaction together with its history row. A checksum mismatch on an already-applied file blocks startup by design. Stack migrations stay reviewable when you bump the submodule; app migrations stay owned by the application repo.
 
 ### Migration Layers
 

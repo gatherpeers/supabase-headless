@@ -1,8 +1,8 @@
 # Edge Functions
 
-Functions run on [supabase/edge-runtime](https://github.com/supabase/edge-runtime) and are exposed by Caddy at `/functions/v1/*`.
+Ship Deno handlers the same way you would on Supabase — `/functions/v1/<name>` — without a per-function compose service or Studio deploy step.
 
-This repository uses a small custom loader instead of one compose service per function. The loader in [index.ts](./index.ts) is baked into the functions image, discovers directories under [app/](./app/), validates the requested function name, and dispatches requests to Edge Runtime workers.
+Functions run on [supabase/edge-runtime](https://github.com/supabase/edge-runtime) behind Caddy. A small custom loader ([index.ts](./index.ts)) is baked into the image: it discovers directories under the bind-mounted [app/](./app/) tree, validates the function name, and dispatches to Edge Runtime workers. Stack helpers (`@stack/`) live in the image; your app mounts only the routable function tree — ideal when this repo is vendored as a submodule.
 
 ## Request Flow
 

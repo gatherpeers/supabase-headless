@@ -1,10 +1,20 @@
 # Gateway (Caddy)
 
-`gateway` is the only public entry point for the stack. It replaces the upstream Kong/Envoy gateway with a single Caddy configuration that handles TLS, route matching, prefix rewrites, CORS, sliding-window rate limits, access logs, and Supabase API-key translation.
+`gateway` is the only public entry point for the stack — and the only process that publishes host ports. It replaces Kong/Envoy with a single, reviewable [Caddy](https://caddyserver.com/) configuration: automatic TLS, route matching, prefix rewrites, CORS, sliding-window rate limits, access logs, security headers, and modern Supabase `sb_*` API-key translation.
 
-> For reference, the official Supabase gateway config (Kong and Envoy) lives in [supabase/supabase `docker/volumes/api`](https://github.com/supabase/supabase/tree/master/docker/volumes/api).
+Where the official self-hosted stack keeps Kong (or Envoy) as the API gateway and optionally puts Caddy in front for TLS, Headless makes Caddy the gateway. One config file, one public edge, backends stay on an internal Docker network.
 
-Path prefixes are configurable in `.env` (`AUTH_PREFIX`, `REST_PREFIX`, `REALTIME_PREFIX`, `STORAGE_PREFIX`, `FUNCTIONS_PREFIX`). Defaults match the conventional Supabase paths.
+> Official Supabase gateway configs (Kong and Envoy) live in [supabase/supabase `docker/volumes/api`](https://github.com/supabase/supabase/tree/master/docker/volumes/api). Upstream also ships a [Caddy overlay](https://github.com/supabase/supabase/blob/master/docker/docker-compose.caddy.yml) that terminates TLS in front of Kong — a different role from this service.
+
+Path prefixes are configurable in `.env` (`AUTH_PREFIX`, `REST_PREFIX`, `REALTIME_PREFIX`, `STORAGE_PREFIX`, `FUNCTIONS_PREFIX`). Defaults match the conventional Supabase paths so official SDKs need no special routing.
+
+## Why Caddy Here
+
+- **Smaller surface** — no Kong declarative config, no Envoy Lua filters to keep in sync with Studio.
+- **Production TLS by default** — local CA for `localhost`, Let's Encrypt when `PUBLIC_API_DOMAIN` is public.
+- **First-class opaque keys** — `sb_publishable_*` / `sb_secret_*` translated to internal ES256 JWTs before Auth, REST, and Realtime see the request.
+- **Hardening that matches (and sometimes leads) upstream** — OpenAPI root restricted to `service_role`, Realtime tenant-admin routes blocked, Functions `/_internal` never exposed.
+- **Operator-friendly** — rate limits, HSTS / frame / nosniff headers, and access logs in one place.
 
 ## Build
 
@@ -12,7 +22,7 @@ The custom image uses [Caddy 2](https://caddyserver.com/) plus [caddy-ratelimit]
 
 ## API Key Translation
 
-[Supabase](https://supabase.com/docs/guides/getting-started/api-keys)'s newer `sb_publishable_*` and `sb_secret_*` keys are opaque strings. The gateway matches them literally and substitutes internal JWTs before proxying to services that expect JWT-shaped `apikey` and `Authorization` values. `sb_publishable_*` is safe for browser/mobile clients; `sb_secret_*` is server-only because it maps to `service_role`.
+[Supabase](https://supabase.com/docs/guides/getting-started/api-keys)'s newer `sb_publishable_*` and `sb_secret_*` keys are opaque strings. The gateway matches them literally and substitutes internal JWTs before proxying to services that expect JWT-shaped `apikey` and `Authorization` values. Clients keep the short opaque keys; backends keep verifying JWTs. `sb_publishable_*` is safe for browser/mobile clients; `sb_secret_*` is server-only because it maps to `service_role`.
 
 Protected routes run this chain:
 
@@ -39,7 +49,7 @@ Storage and Functions intentionally do not require a gateway API-key check. Stor
 - `/auth/v1/*` -> `auth:9999`, API key required.
 - `/rest/v1`, `/rest/v1/` (OpenAPI spec root) -> `rest:3000`, `service_role` only (anon/publishable get `403`); mirrors [supabase/supabase#45462](https://github.com/supabase/supabase/pull/45462).
 - `/rest/v1/*` -> `rest:3000`, API key required.
-- `/graphql/v1/*` -> `rest:3000/rpc/graphql`, API key required; requires the `graphql` schema to exist.
+- `/graphql/v1/*` -> `rest:3000/rpc/graphql` with `Content-Profile: graphql_public`, API key required; needs `pg_graphql` and a `graphql_public` schema (not shipped by default).
 - `/realtime/v1/api/tenants*` and `/realtime/v1/api/openapi*` -> blocked with `403`.
 - `/realtime/v1/api/*` -> `realtime:4000/api/*`, API key required.
 - `/realtime/v1/*` -> `realtime:4000/socket/*`, API key required.

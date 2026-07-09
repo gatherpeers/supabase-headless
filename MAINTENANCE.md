@@ -1,6 +1,8 @@
 # Dependency Maintenance
 
-This project is intentionally biased toward current upstream releases. The stack stays smaller than the official self-hosted bundle, so PostgreSQL and Supabase service images can usually be reviewed and upgraded faster. It still does not blindly track `latest`: version numbers live in source files and every bump should be tested before deployment.
+Current-first is a product feature of this stack, not an accident of packaging. Because Headless omits Studio, analytics, and the Kong/Envoy coordination surface, PostgreSQL and the Supabase service images can usually be reviewed and upgraded faster than the full official self-hosted bundle. That makes it practical to adopt newer Auth, Realtime, Storage, PostgREST, and Edge Runtime releases between upstream compose bumps — when you choose to.
+
+It still does not blindly track `latest`: version numbers live in source files and every bump should be tested before deployment.
 
 ## Pin Locations
 
