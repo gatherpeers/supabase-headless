@@ -1,6 +1,5 @@
 {
   "imports": {
-    "@stack/": "./_shared/",
-    "@shared/": "/home/deno/functions/_shared/"
+    "@stack/": "./_shared/"
   }
 }

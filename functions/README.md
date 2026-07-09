@@ -20,7 +20,7 @@ Workers are reused with `forceCreate: false`. If a worker has already retired, t
 functions/
 ├── Dockerfile         # Bakes loader + stack _shared into the image
 ├── index.ts           # Main loader (image)
-├── deno.json          # @stack and @shared import aliases for workers
+├── deno.json          # Loader/worker @stack alias (image)
 ├── _shared/           # Stack helpers (image), not routable
 │   ├── json.ts
 │   ├── requireEnv.ts
@@ -54,12 +54,13 @@ services:
       - ./functions:/home/deno/functions:ro
 ```
 
-The vendor tree only needs function folders and an optional `_shared/` directory:
+The vendor tree needs function folders and an optional `_shared/` directory:
 
 ```text
-my-app/supabase/functions/
+my-app/functions/
 ├── checkout-webhook/
-│   └── index.ts
+│   │── index.ts
+├───└── util.ts
 └── _shared/
     └── billing.ts
 ```
@@ -67,23 +68,25 @@ my-app/supabase/functions/
 Rebuild the functions image when upgrading the stack submodule to pick up loader or `@stack` helper updates:
 
 ```bash
-docker compose build functions
-docker compose up -d functions
+docker compose build functions --no-cache
+docker compose up -d --force-recreate --no-deps functions
 ```
 
 ## Import Aliases
 
-Workers resolve shared code through [deno.json](./deno.json):
+Workers read [deno.json](./deno.json) baked in the image for `@stack/` only.
 
-- `@stack/`: stack helpers baked into the image
-- `@shared/`: optional helpers from `_shared/` on the mount (e.g. `functions/_shared/` in your app repo)
+- `@stack/`: stack helpers in the image (`./_shared/` relative to the loader)
+- App helpers in `_shared/`: use relative imports from each function, e.g. `../_shared/billing.ts`
+
+Edge Runtime workers run inside each function directory. Import-map aliases to paths outside that directory (including absolute `/home/deno/functions/_shared/`) are not loaded reliably. Relative `../_shared/` imports from sibling folders on the mount work.
 
 ```ts
 import { json } from '@stack/json.ts'
-import { billCustomer } from '@shared/billing.ts' // Just an example
+import { billCustomer } from '../_shared/billing.ts'
 ```
 
-Do not mount over stack `_shared`. Extend behavior through `@shared/` or local files inside the function directory.
+Do not mount over stack `_shared`. Extend behavior through `functions/_shared/` on the mount or local files inside the function directory.
 
 ## Worker Limits
 
