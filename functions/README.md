@@ -107,13 +107,17 @@ These endpoints are for container-internal use. Caddy blocks `/functions/v1/_int
 
 ## Writing A Function
 
-Create `functions/app/<name>/index.ts` and call `Deno.serve(...)`.
+Create `functions/app/<name>/index.ts` and export a default object with a `fetch` handler (the module worker contract used by Supabase Edge Functions, Cloudflare Workers, and Bun):
 
 ```ts
 import { json } from '@stack/json.ts'
 
-Deno.serve(() => json({ ok: true }))
+export default {
+  fetch: () => json({ ok: true }),
+}
 ```
+
+Do not use `Deno.serve` in app functions. The loader in [index.ts](./index.ts) still uses `Deno.serve` as the container entrypoint; that is separate from per-function handlers.
 
 The app directory is mounted read-only into the container. During development, a changed file may still be cached by a live worker; restart `functions` when you need a clean reload.
 
@@ -127,19 +131,21 @@ Caller-scoped RLS client:
 import { json } from '@stack/json.ts'
 import { createRlsClient } from '@stack/supabase.ts'
 
-Deno.serve(async (req) => {
-  let supabase
-  try {
-    supabase = createRlsClient(req)
-  } catch {
-    return json({ msg: 'Unauthorized' }, 401)
-  }
+export default {
+  fetch: async (req: Request) => {
+    let supabase
+    try {
+      supabase = createRlsClient(req)
+    } catch {
+      return json({ msg: 'Unauthorized' }, 401)
+    }
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return json({ msg: 'Unauthorized' }, 401)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return json({ msg: 'Unauthorized' }, 401)
 
-  return json({ user })
-})
+    return json({ user })
+  },
+}
 ```
 
 Service-role client:
@@ -147,11 +153,13 @@ Service-role client:
 ```ts
 import { createAdminClient } from '@stack/supabase.ts'
 
-Deno.serve(async () => {
-  // Add application-specific authorization before bypassing RLS.
-  const supabase = createAdminClient()
-  // ...
-})
+export default {
+  fetch: async () => {
+    // Add application-specific authorization before bypassing RLS.
+    const supabase = createAdminClient()
+    // ...
+  },
+}
 ```
 
 Never use the service-role client for a public handler without an authorization check.
