@@ -32,7 +32,7 @@
 
 # Caddy already auto-injects Host, X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host on every reverse_proxy (see "Defaults" in the reverse_proxy docs). We only add the two headers Supabase services read in addition:
 #  - X-Real-IP: gotrue/postgrest helpers consume it as a single-IP fallback.
-#  - X-Request-ID: GOTRUE_REQUEST_ID_HEADER and access-log correlation.
+#  - X-Request-ID: REQUEST_ID_HEADER and access-log correlation.
 (forwarded_headers) {
 	header_up X-Real-IP {client_ip}
 	header_up X-Request-ID {request_id}

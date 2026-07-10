@@ -32,14 +32,14 @@ services:
       -c max_replication_slots=10
       -c max_slot_wal_keep_size=4GB
       -c max_wal_senders=10
-      -c log_min_messages=fatal
+      -c log_min_messages=warning
       -c work_mem=${POSTGRES_WORK_MEM:-32MB}
       -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-200}
       -c shared_preload_libraries='pg_stat_statements'
       -c pg_stat_statements.track=all
       -c password_encryption=scram-sha-256
     environment:
-      # Database config
+      # Database
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -47,7 +47,7 @@ services:
       POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8 --text-search-config=simple"
       PGDATA: /var/lib/postgresql/data
 
-      # Entrypoint bootstrap (db/init.sql)
+      # Bootstrap roles (db/init.sql)
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD}
       STORAGE_DB_PASSWORD: ${STORAGE_DB_PASSWORD}
       PGRST_AUTH_USER: ${PGRST_AUTH_USER:-authenticator}
@@ -83,6 +83,7 @@ services:
       realtime:
         condition: service_healthy
     environment:
+      # Database (libpq)
       PGHOST: db
       PGPORT: ${POSTGRES_PORT:-5432}
       PGUSER: ${POSTGRES_USER:-postgres}
@@ -113,12 +114,15 @@ services:
       db-migrate:
         condition: service_completed_successfully
     environment:
+      # Server
       PG_META_HOST: 0.0.0.0
       PG_META_PORT: 8080
+
+      # Database
       PG_META_DB_HOST: db
+      PG_META_DB_PORT: ${POSTGRES_PORT:-5432}
       PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
       PG_META_DB_USER: ${POSTGRES_USER:-postgres}
-      PG_META_DB_PORT: ${POSTGRES_PORT:-5432}
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - private_net
@@ -134,7 +138,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Boot wiring
+      # Server
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: postgres
@@ -142,15 +146,16 @@ services:
       # Explicit pool cap. Upstream default is 0 (unlimited); bound it so it fits the Postgres connection budget (see db/README.md).
       GOTRUE_DB_MAX_POOL_SIZE: ${AUTH_DB_POOL_SIZE:-10}
 
+      # Public URLs / redirects
       # /auth/v1 prefix included -> GoTrue emits OAuth callbacks, SAML endpoints and email links under the gateway's auth path (custom OAuth providers work out of the box, SAML SSO lives at /auth/v1/sso/saml/*).
       API_EXTERNAL_URL: ${PUBLIC_API_URL}${AUTH_PREFIX}
       GOTRUE_SITE_URL: ${APP_URL}
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST}
+
+      # Auth policy
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${GOTRUE_EXTERNAL_EMAIL_ENABLED:-true}
-      GOTRUE_RATE_LIMIT_HEADER: ${GOTRUE_RATE_LIMIT_HEADER:-X-Forwarded-For}
-      GOTRUE_REQUEST_ID_HEADER: ${GOTRUE_REQUEST_ID_HEADER:-X-Request-ID}
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
       GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: ${GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED:-true}
-      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-warn}
 
       # JWT (from generate-keys / .env)
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
@@ -160,6 +165,11 @@ services:
       GOTRUE_JWT_AUD: ${JWT_AUD}
       # Still necessary despite deprecation warnings. Without it, GoTrue issues user JWTs with an empty "role" claim.
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+
+      # Observability
+      GOTRUE_RATE_LIMIT_HEADER: ${GOTRUE_RATE_LIMIT_HEADER:-X-Forwarded-For}
+      REQUEST_ID_HEADER: ${REQUEST_ID_HEADER:-X-Request-ID}
+      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-warn}
     networks:
       - private_net
       - public_net
@@ -189,8 +199,13 @@ services:
       # Server
       PORT: 4000
       APP_NAME: realtime
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      REALTIME_IP_VERSION: ipv4
+      RUN_JANITOR: "true"
 
-      # DB - migrations & runtime
+      # Database
       DB_HOST: db
       DB_PORT: ${POSTGRES_PORT:-5432}
       DB_NAME: ${POSTGRES_DB:-postgres}
@@ -198,7 +213,6 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       # Authorization (RLS check) pool. Realtime also opens ~1 connection for broadcast-from-database replication; budget accordingly (see db/README.md).
       DB_POOL_SIZE: ${REALTIME_DB_POOL_SIZE:-5}
-
       DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime, extensions, public"
       DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
       # Silence IPv4 warnings
@@ -212,20 +226,9 @@ services:
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       METRICS_JWT_SECRET: ${JWT_SECRET}
 
-      ERL_AFLAGS: -proto_dist inet_tcp
-      DNS_NODES: "''"
-      RLIMIT_NOFILE: "10000"
-      RUN_JANITOR: "true"
-
-      # Replication
-      REPLICATION_MODE: RLS
-      REPLICATION_POLL_INTERVAL: 100
-      SECURE_CHANNELS: "true"
+      # Replication / self-host tenant
       # Max 63 chars total: supabase_realtime_messages_replication_slot_ (45) + suffix (≤18).
       SLOT_NAME_SUFFIX: ${SLOT_NAME_SUFFIX:-local}
-      REALTIME_IP_VERSION: ipv4
-
-      # Self-host tenant
       SEED_SELF_HOST: "true"
       SELF_HOST_TENANT_NAME: ${PUBLIC_API_DOMAIN}
 
@@ -234,7 +237,7 @@ services:
       DASHBOARD_USER: ${REALTIME_DASHBOARD_USER:-admin}
       DASHBOARD_PASSWORD: ${REALTIME_DASHBOARD_PASSWORD}
 
-      # Logging
+      # Observability
       DISABLE_HEALTHCHECK_LOGGING: "true"
       LOG_LEVEL: ${REALTIME_LOG_LEVEL:-warning}
     networks:
@@ -258,22 +261,28 @@ services:
       db:
         condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://${PGRST_AUTH_USER:-authenticator}:${PGRST_AUTH_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
-      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
-      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE:-anon}
-      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
-
-      # JWKS so PostgREST can verify both ES256 (asymmetric) and HS256 (symmetric) tokens.
-      PGRST_JWT_SECRET: ${JWT_JWKS}
-
-      PGRST_OPENAPI_SERVER_PROXY_URI: ${PUBLIC_API_URL}${REST_PREFIX:-/rest/v1}
-      PGRST_DB_POOL: ${PGRST_DB_POOL:-20}
-      PGRST_LOG_LEVEL: ${PGRST_LOG_LEVEL:-warn}
-
-      # Healthcheck
+      # Server
       PGRST_SERVER_HOST: 0.0.0.0
       PGRST_ADMIN_SERVER_HOST: 127.0.0.1
       PGRST_ADMIN_SERVER_PORT: 3001
+
+      # Database
+      PGRST_DB_URI: postgres://${PGRST_AUTH_USER:-authenticator}:${PGRST_AUTH_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public,extensions}
+      PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE:-anon}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_POOL: ${PGRST_DB_POOL:-20}
+
+      # JWT — JWKS so PostgREST can verify both ES256 (asymmetric) and HS256 (symmetric) tokens.
+      PGRST_JWT_SECRET: ${JWT_JWKS}
+
+      # Public URL
+      PGRST_OPENAPI_SERVER_PROXY_URI: ${PUBLIC_API_URL}${REST_PREFIX:-/rest/v1}
+
+      # Observability
+      PGRST_SERVER_TRACE_HEADER: ${REQUEST_ID_HEADER:-X-Request-ID}
+      PGRST_LOG_LEVEL: ${PGRST_LOG_LEVEL:-warn}
     networks:
       - private_net
     healthcheck:
@@ -291,13 +300,18 @@ services:
     security_opt:
       - "no-new-privileges:true"
     environment:
+      # Credentials
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
 
+      # Server / region
+      RUSTFS_REGION: ${S3_REGION:-local}
+      RUSTFS_CONSOLE_ENABLE: ${RUSTFS_CONSOLE_ENABLE:-false}
       RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
       RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
       RUSTFS_CORS_ALLOWED_ORIGINS: "*"
 
+      # Observability
       RUST_LOG: ${RUST_LOG:-warn}
     volumes:
       - rustfs_data:/data
@@ -345,18 +359,26 @@ services:
           memory: 1G
     logging: *default-logging
     environment:
+      # Server
+      IMGPROXY_BIND: :5001
+      # Reachable only from private_net (not exposed publicly). `IMGPROXY_KEY` and `IMGPROXY_SALT` aren't defined thus produce a warning, omit safely
+
+      # S3 backend (RustFS)
       IMGPROXY_USE_S3: "true"
       IMGPROXY_S3_ENDPOINT: http://rustfs:9000
       AWS_REGION: ${S3_REGION:-local}
       AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
-      IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
-      IMGPROXY_FAIL_ON_DEPRECATION: ${IMGPROXY_FAIL_ON_DEPRECATION:-true}
-      IMGPROXY_BIND: :5001
+      AWS_S3_FORCE_PATH_STYLE: "true"
+
+      # Transforms / limits
       IMGPROXY_USE_ETAG: "true"
       IMGPROXY_AUTO_WEBP: "true"
-      AWS_S3_FORCE_PATH_STYLE: "true"
-      # Reachable only from private_net (not exposed publicly). `IMGPROXY_KEY` and `IMGPROXY_SALT` aren't defined thus produce a warning, omit safely
+      IMGPROXY_MAX_SRC_FILE_SIZE: ${FILE_SIZE_LIMIT:-52428800}
+      IMGPROXY_FAIL_ON_DEPRECATION: ${IMGPROXY_FAIL_ON_DEPRECATION:-true}
+
+      # Observability
+      IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
     networks:
       - private_net
     healthcheck:
@@ -387,32 +409,45 @@ services:
       rustfs-createbucket:
         condition: service_completed_successfully
     environment:
+      # Auth / JWT
       ANON_KEY: ${ANON_KEY_ASYMMETRIC}
       SERVICE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
-      LOG_LEVEL: ${STORAGE_LOG_LEVEL:-warn}
-      POSTGREST_URL: http://rest:3000
       PGRST_JWT_SECRET: ${JWT_JWKS}
       JWT_JWKS: ${JWT_JWKS}
+      JWT_CACHING_ENABLED: ${STORAGE_JWT_CACHING_ENABLED:-true}
+      TENANT_ID: ${STORAGE_TENANT_ID:-default}
+
+      # Database
       DATABASE_URL: postgres://supabase_storage_admin:${STORAGE_DB_PASSWORD}@db:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       # Explicit pool cap (upstream default is 20). Keep it within the Postgres connection budget (see db/README.md).
       DATABASE_MAX_CONNECTIONS: ${STORAGE_DB_POOL_SIZE:-15}
+
+      # S3 backend (RustFS)
       STORAGE_BACKEND: s3
       GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET:-supabase-global}
       GLOBAL_S3_ENDPOINT: http://rustfs:9000
-      GLOBAL_S3_PROTOCOL: http
       GLOBAL_S3_FORCE_PATH_STYLE: "true"
       REGION: ${S3_REGION:-local}
       AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+
+      # Public URL / gateway prefix
       STORAGE_PUBLIC_URL: ${PUBLIC_API_URL}
       # Honour the gateway's X-Forwarded-Prefix header so S3 SigV4 signature verification and TUS upload Location URLs reconstruct the original /storage/v1 prefix correctly.
       REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+
+      # Uploads
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
       TUS_URL_PATH: ${STORAGE_PREFIX:-/storage/v1}/upload/resumable
       TUS_ALLOW_S3_TAGS: "false"
+
+      # Image transforms
       ENABLE_IMAGE_TRANSFORMATION: "true"
-      TENANT_ID: default
       IMGPROXY_URL: http://imgproxy:5001
-      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+
+      # Observability
+      REQUEST_ID_HEADER: ${REQUEST_ID_HEADER:-X-Request-ID}
+      LOG_LEVEL: ${STORAGE_LOG_LEVEL:-warn}
     networks:
       - private_net
     healthcheck:
@@ -439,13 +474,11 @@ services:
       storage:
         condition: service_healthy
     environment:
+      # Supabase client (injected into user functions)
       SUPABASE_URL: http://gateway
       SUPABASE_PUBLIC_URL: ${PUBLIC_API_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY_ASYMMETRIC}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
-
-      # SUPABASE_PUBLISHABLE_KEYS:
-      # SUPABASE_SECRET_KEYS:
     volumes:
       - ./functions/app:/home/deno/functions:ro
     networks:
@@ -494,18 +527,24 @@ services:
       - caddy_data:/data
       - ./logs/caddy:/var/log/caddy
     environment:
+      # Server / TLS
       PUBLIC_API_DOMAIN: ${PUBLIC_API_DOMAIN}
       CADDY_CONTACT_EMAIL: ${CADDY_CONTACT_EMAIL:-admin@localhost}
+      CADDY_LOG_LEVEL: ${CADDY_LOG_LEVEL:-WARN}
+
+      # CORS / rate limit
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN}
       GATEWAY_RATE_LIMIT_EVENTS: ${GATEWAY_RATE_LIMIT_EVENTS:-100}
       GATEWAY_RATE_LIMIT_WINDOW: ${GATEWAY_RATE_LIMIT_WINDOW:-1s}
+
+      # Path prefixes
       AUTH_PREFIX: ${AUTH_PREFIX:-/auth/v1}
       REST_PREFIX: ${REST_PREFIX:-/rest/v1}
       REALTIME_PREFIX: ${REALTIME_PREFIX:-/realtime/v1}
       STORAGE_PREFIX: ${STORAGE_PREFIX:-/storage/v1}
       FUNCTIONS_PREFIX: ${FUNCTIONS_PREFIX:-/functions/v1}
       REALTIME_DASHBOARD_PREFIX: ${REALTIME_DASHBOARD_PREFIX:-/admin}
-      CADDY_LOG_LEVEL: ${CADDY_LOG_LEVEL:-WARN}
+
       # API key translation: opaque sb_* keys -> internal asymmetric JWTs, plus accept-list of asymmetric (*_ASYMMETRIC) and legacy (ANON_KEY / SERVICE_ROLE_KEY HS256) JWTs that pass through the gateway untouched. The `:-__unset_*__` defaults ensure each map input stays unique even when an env var is unset or empty (Caddy's `map` directive rejects duplicate inputs at config-load time, and an empty string for two rows would collide).
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-__unset_publishable_key__}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-__unset_secret_key__}
