@@ -21,7 +21,7 @@
  * Run locally:                  `node generate-keys.mjs --update-env`
  * Force rotation:               `node generate-keys.mjs --update-env --rotate`
  * Print only (no .env touch):   `node generate-keys.mjs`
- * Host without Node (e.g. VPS): `docker run --rm -v "${PWD}:/work" -w /work node:24.16.0-alpine node generate-keys.mjs --update-env`
+ * Host without Node (e.g. VPS): `docker run --rm -v "${PWD}:/work" -w /work node:24.18.0-alpine node generate-keys.mjs --update-env`
  */
 
 import crypto from 'node:crypto'
