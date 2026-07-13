@@ -128,7 +128,7 @@ services:
       - private_net
 
   auth:
-    image: supabase/auth:v2.192.0
+    image: supabase/auth:v2.193.0
     logging: *default-logging
     container_name: supabase-auth
     restart: always
