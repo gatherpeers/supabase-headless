@@ -9,7 +9,7 @@ set -Eeuo pipefail
 
 SCHEMAS="${1:-public,storage,auth}"
 OUT_FILE="${2:-database.types.ts}"
-POSTGREST_VERSION="${POSTGREST_VERSION:-14.14}"
+POSTGREST_VERSION="${POSTGREST_VERSION:-14.15}"
 PROFILE="${COMPOSE_PROFILE:-meta}"
 SERVICE="${PG_META_SERVICE:-postgres-meta}"
 
