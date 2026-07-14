@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.110.4'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.110.5'
 import { requireEnv } from './requireEnv.ts'
 
 // Uses the internal docker service name of the gateway so communication is internal. URLs generated won't be public.
