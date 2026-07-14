@@ -160,9 +160,9 @@ services:
       # JWT (from generate-keys / .env)
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_KEYS: ${JWT_KEYS}
-      GOTRUE_JWT_ISSUER: ${GOTRUE_JWT_ISSUER}
-      GOTRUE_JWT_EXP: ${JWT_EXP}
-      GOTRUE_JWT_AUD: ${JWT_AUD}
+      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ISSUER: ${PUBLIC_API_URL}${AUTH_PREFIX}
       # Still necessary despite deprecation warnings. Without it, GoTrue issues user JWTs with an empty "role" claim.
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
 
@@ -223,12 +223,12 @@ services:
       # Auth / crypto
       API_JWT_SECRET: ${JWT_SECRET}
       API_JWT_JWKS: ${JWT_JWKS}
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
       METRICS_JWT_SECRET: ${JWT_SECRET}
 
       # Replication / self-host tenant
       # Max 63 chars total: supabase_realtime_messages_replication_slot_ (45) + suffix (≤18).
-      SLOT_NAME_SUFFIX: ${SLOT_NAME_SUFFIX:-local}
+      SLOT_NAME_SUFFIX: ${REALTIME_SLOT_NAME_SUFFIX:-local}
       SEED_SELF_HOST: "true"
       SELF_HOST_TENANT_NAME: ${PUBLIC_API_DOMAIN}
 
@@ -312,7 +312,7 @@ services:
       RUSTFS_CORS_ALLOWED_ORIGINS: "*"
 
       # Observability
-      RUST_LOG: ${RUST_LOG:-warn}
+      RUST_LOG: ${RUSTFS_LOG_LEVEL:-warn}
     volumes:
       - rustfs_data:/data
     networks:
@@ -536,6 +536,7 @@ services:
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN}
       GATEWAY_RATE_LIMIT_EVENTS: ${GATEWAY_RATE_LIMIT_EVENTS:-100}
       GATEWAY_RATE_LIMIT_WINDOW: ${GATEWAY_RATE_LIMIT_WINDOW:-1s}
+      REQUEST_ID_HEADER: ${REQUEST_ID_HEADER:-X-Request-ID}
 
       # Path prefixes
       AUTH_PREFIX: ${AUTH_PREFIX:-/auth/v1}

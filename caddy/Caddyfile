@@ -35,7 +35,7 @@
 #  - X-Request-ID: REQUEST_ID_HEADER and access-log correlation.
 (forwarded_headers) {
 	header_up X-Real-IP {client_ip}
-	header_up X-Request-ID {request_id}
+	header_up {$REQUEST_ID_HEADER} {request_id}
 }
 
 # Resolves the Apikey header to the matching internal asymmetric JWT. Mirrors the combined effect of Envoy's "translate apikey in header" Lua filter and the accept-list inside the "401 for missing/invalid API key" filter:
