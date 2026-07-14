@@ -10,6 +10,6 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.110.3"
+    "@supabase/supabase-js": "^2.110.4"
   }
 }
