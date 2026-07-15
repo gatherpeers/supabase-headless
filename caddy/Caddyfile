@@ -54,6 +54,8 @@
 #   {_role}              = "anon" | "service_role" | ""
 # An empty role means "no recognised key supplied" (missing, invalid, or AWS SigV4). Subsequent snippets read these directly via the `vars` matcher's placeholder form (canonical Caddy idiom, see https://caddyserver.com/docs/caddyfile/matchers#vars).
 #
+# Caddy evaluates map outputs lazily. Snapshot the client key so translating the Apikey header cannot change the map source before later query, Authorization, and X-Api-Key consumers run.
+#
 # compose passes distinct sentinels for blank keys so the map remains valid in upstream-compatible legacy-only mode. The guard rejects every sentinel before any route can translate or authorize it.
 (api_key_lookup) {
 	@unset_config_key expression `{http.request.header.Apikey} == "__unset_publishable_key__" || {http.request.header.Apikey} == "__unset_secret_key__" || {http.request.header.Apikey} == "__unset_anon_key_asymmetric__" || {http.request.header.Apikey} == "__unset_service_role_key_asymmetric__" || {http.request.header.Apikey} == "__unset_legacy_anon_key__" || {http.request.header.Apikey} == "__unset_legacy_service_role_key__"`
@@ -62,7 +64,8 @@
 		respond `{"message":"No API key found in request"}` 401
 	}
 
-	map {http.request.header.Apikey} {_translated_apikey} {_role} {
+	vars _client_apikey {http.request.header.Apikey}
+	map {vars._client_apikey} {_translated_apikey} {_role} {
 		"{$SUPABASE_PUBLISHABLE_KEY}" "{$ANON_KEY_ASYMMETRIC}" "anon"
 		"{$SUPABASE_SECRET_KEY}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
 		"{$ANON_KEY}" "{$ANON_KEY}" "anon"
