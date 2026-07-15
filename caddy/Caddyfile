@@ -19,10 +19,13 @@
 # Snippets — mirror the official Supabase Envoy filter chain in volumes/api/envoy/lds.template.yaml. Snippet names match the Envoy filter they replace so the two configs are easy to cross-reference. Routes below also carry their Envoy/Kong route names in comments (auth-v1-protected, rest-v1-protected, realtime-v1-ws-protected, etc.).
 # ============================================================================
 
-# Front-edge sliding-window rate limit. Caddy-only addition; Kong/Envoy do not rate-limit at the gateway by default in the upstream Supabase setup.
+# Public-edge sliding-window rate limit. Caddy-only addition; Kong/Envoy do not rate-limit at the gateway by default in the upstream Supabase setup. The private :8080 listener is exempt.
 (api_rate_limit) {
 	rate_limit {
 		zone my_api_zone {
+			match {
+				expression `{http.request.local.port} != 8080`
+			}
 			# {client_ip} resolves to the immediate peer when no CDN is in front, or to the parsed real client IP once `trusted_proxies` is configured in the global `servers {}` block above.
 			key {client_ip}
 			events {$GATEWAY_RATE_LIMIT_EVENTS}
@@ -42,11 +45,9 @@
 # Resolves the Apikey header to the matching internal asymmetric JWT. Mirrors the combined effect of Envoy's "translate apikey in header" Lua filter and the accept-list inside the "401 for missing/invalid API key" filter:
 #   1. SUPABASE_PUBLISHABLE_KEY        -> swap to ANON_KEY_ASYMMETRIC         (anon)
 #   2. SUPABASE_SECRET_KEY             -> swap to SERVICE_ROLE_KEY_ASYMMETRIC (service_role)
-#   3. ANON_KEY_ASYMMETRIC             -> pass through                        (anon)
-#   4. SERVICE_ROLE_KEY_ASYMMETRIC     -> pass through                        (service_role)
-#   5. ANON_KEY (legacy HS256)         -> pass through                        (anon)
-#   6. SERVICE_ROLE_KEY (legacy HS256) -> pass through                        (service_role)
-# Cases 3-4 let Edge Functions (and any internal caller) reach the gateway carrying the internal asymmetric JWT they were configured with. Cases 5-6 are the legacy backward-compat path the platform still accepts.
+#   3. ANON_KEY (legacy HS256)         -> pass through                        (anon)
+#   4. SERVICE_ROLE_KEY (legacy HS256) -> pass through                        (service_role)
+# Internal asymmetric JWTs are translation targets only, matching upstream Kong/Envoy. Cases 3-4 retain the upstream legacy backward-compatibility path.
 
 # Output (custom placeholders, populated by the map directive):
 #   {_translated_apikey} = JWT to forward upstream (or "")
@@ -64,8 +65,6 @@
 	map {http.request.header.Apikey} {_translated_apikey} {_role} {
 		"{$SUPABASE_PUBLISHABLE_KEY}" "{$ANON_KEY_ASYMMETRIC}" "anon"
 		"{$SUPABASE_SECRET_KEY}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
-		"{$ANON_KEY_ASYMMETRIC}" "{$ANON_KEY_ASYMMETRIC}" "anon"
-		"{$SERVICE_ROLE_KEY_ASYMMETRIC}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
 		"{$ANON_KEY}" "{$ANON_KEY}" "anon"
 		"{$SERVICE_ROLE_KEY}" "{$SERVICE_ROLE_KEY}" "service_role"
 		default "" ""
@@ -108,7 +107,7 @@
 # Mirrors Envoy's "synth Authorization" Lua filter (lines 796-862). Synthesizes `Authorization: Bearer <internal asymmetric JWT>` when the client did not send a real bearer token of its own.
 #
 # DELIBERATE DIVERGENCE FROM ENVOY (kept — strictly safer):
-# Envoy's `has_real_jwt` returns false for ANY Authorization that does not begin with "Bearer " (for example AWS SigV4: `AWS4-HMAC-SHA256 Credential=…`), so when an apikey is also present Envoy would overwrite the SigV4 header. We only synthesize in two cases, both gated on a known sb_*/internal asymmetric JWTs/legacy key being present:
+# Envoy's `has_real_jwt` returns false for ANY Authorization that does not begin with "Bearer " (for example AWS SigV4: `AWS4-HMAC-SHA256 Credential=…`), so when an apikey is also present Envoy would overwrite the SigV4 header. We only synthesize in two cases, both gated on a known opaque/legacy key being present:
 #   1. Authorization is absent or empty.
 #   2. Authorization starts with "Bearer sb_" (the client passed an opaque key in both headers, which is not a valid JWT).
 # Any other Authorization (real Bearer JWT, AWS SigV4, anything else) is left untouched. In practice no real client sends both SigV4 and an sb_* apikey, so the only observable effect is preserving SigV4 on Storage — which is the correct behaviour.
@@ -381,7 +380,7 @@
 		# ============================================================
 
 		# storage-v1 -> storage:5000/*
-		# Storage authenticates internally (asymmetric JWT or AWS SigV4). The gateway translates apikey when it is a known sb_*/internal asymmetric JWTs/legacy value but never rejects on missing apikey (S3 presigned URLs carry no header). AWS SigV4 Authorization headers are left untouched (see the DELIBERATE DIVERGENCE comment on the synth_authorization snippet). Storage requires X-Forwarded-Prefix for S3 SigV4 verification and TUS Location URL construction; storage env must set REQUEST_ALLOW_X_FORWARDED_PATH=true for it to be honoured.
+		# Storage authenticates internally (asymmetric JWT or AWS SigV4). The gateway translates apikey when it is a known opaque/legacy value but never rejects on missing apikey (S3 presigned URLs carry no header). AWS SigV4 Authorization headers are left untouched (see the DELIBERATE DIVERGENCE comment on the synth_authorization snippet). Storage requires X-Forwarded-Prefix for S3 SigV4 verification and TUS Location URL construction; storage env must set REQUEST_ALLOW_X_FORWARDED_PATH=true for it to be honoured.
 		handle_path {$STORAGE_PREFIX}/* {
 			route {
 				import apikey_from_query
@@ -466,6 +465,9 @@
 		# ============================================================
 		# Custom: Realtime admin dashboard at /admin/*
 		# ============================================================
+		@realtime_dashboard_root path {$REALTIME_DASHBOARD_PREFIX} {$REALTIME_DASHBOARD_PREFIX}/
+		redir @realtime_dashboard_root {$REALTIME_DASHBOARD_PREFIX}/dashboard/ 308
+
 		handle {$REALTIME_DASHBOARD_PREFIX}/* {
 			reverse_proxy realtime:4000 {
 				import forwarded_headers

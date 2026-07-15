@@ -375,10 +375,11 @@ services:
       IMGPROXY_USE_ETAG: "true"
       IMGPROXY_AUTO_WEBP: "true"
       IMGPROXY_MAX_SRC_FILE_SIZE: ${FILE_SIZE_LIMIT:-52428800}
-      IMGPROXY_FAIL_ON_DEPRECATION: ${IMGPROXY_FAIL_ON_DEPRECATION:-true}
+      IMGPROXY_MAX_SRC_RESOLUTION: ${IMGPROXY_MAX_SRC_RESOLUTION:-25}
 
       # Observability
       IMGPROXY_LOG_LEVEL: ${IMGPROXY_LOG_LEVEL:-warn}
+      IMGPROXY_FAIL_ON_DEPRECATION: ${IMGPROXY_FAIL_ON_DEPRECATION:-true}
     networks:
       - private_net
     healthcheck:
@@ -389,7 +390,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.66.8
+    image: supabase/storage-api:v1.66.10
     logging: *default-logging
     container_name: supabase-storage
     restart: always
@@ -477,8 +478,11 @@ services:
       # Supabase client (injected into user functions)
       SUPABASE_URL: http://gateway:8080
       SUPABASE_PUBLIC_URL: ${PUBLIC_API_URL}
-      SUPABASE_ANON_KEY: ${ANON_KEY_ASYMMETRIC}
-      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
+      # Legacy keys remain the conventional singular defaults; opaque keys are also available under the upstream plural maps.
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEYS: "{\"default\":\"${SUPABASE_PUBLISHABLE_KEY:-}\"}"
+      SUPABASE_SECRET_KEYS: "{\"default\":\"${SUPABASE_SECRET_KEY:-}\"}"
     volumes:
       - ./functions/app:/home/deno/functions:ro
     networks:

@@ -36,10 +36,9 @@ Accepted keys:
 
 - `SUPABASE_PUBLISHABLE_KEY` -> `ANON_KEY_ASYMMETRIC`
 - `SUPABASE_SECRET_KEY` -> `SERVICE_ROLE_KEY_ASYMMETRIC`
-- `ANON_KEY_ASYMMETRIC` and `SERVICE_ROLE_KEY_ASYMMETRIC` pass through for internal callers.
 - Legacy HS256 `ANON_KEY` and `SERVICE_ROLE_KEY` pass through for migration compatibility.
 
-Blank key variables are represented internally by distinct map sentinels, but Caddy rejects those values before lookup. This preserves upstream-compatible legacy-only operation without making a predictable placeholder usable as an API key. Locally generated opaque keys use Supabase's `supabase-self-hosted|<key>` checksum input; the gateway still treats the complete key as an opaque literal, like upstream.
+Internal asymmetric JWTs are translation targets, not accepted client API keys. Blank key variables are represented internally by distinct map sentinels, but Caddy rejects those values before lookup. This preserves upstream-compatible legacy-only operation without making a predictable placeholder usable as an API key. Locally generated opaque keys use Supabase's `supabase-self-hosted|<key>` checksum input; the gateway still treats the complete key as an opaque literal, like upstream.
 
 Storage and Functions intentionally do not require a gateway API-key check. Storage must accept signed URLs and AWS SigV4 requests; Functions perform their own handler-level authorization. When Storage does include a recognized key, Caddy translates it but does not overwrite AWS SigV4 `Authorization` headers.
 
@@ -60,7 +59,7 @@ Storage and Functions intentionally do not require a gateway API-key check. Stor
 - `/functions/v1/*` -> `functions:9000`, gateway auth bypass.
 - `/admin/*` -> `realtime:4000`, protected by Realtime dashboard auth.
 
-`/realtime/v1/admin/*` redirects to `/admin/*`. Realtime tenant-management endpoints are blocked at the gateway to match the upstream hardening in [supabase/supabase#46856](https://github.com/supabase/supabase/pull/46856).
+`/admin` and `/admin/` redirect to `/admin/dashboard/`. `/realtime/v1/admin/*` redirects to `/admin/*`. Realtime tenant-management endpoints are blocked at the gateway to match the upstream hardening in [supabase/supabase#46856](https://github.com/supabase/supabase/pull/46856).
 
 Realtime seeding and proxied API/WebSocket requests share the stable `REALTIME_TENANT_ID` value. Caddy rewrites the upstream `Host` header to this identifier so Realtime resolves the same tenant regardless of the public API domain.
 
@@ -105,7 +104,7 @@ On Linux with Caddy binding host ports `80` and `443`, consider setting Docker `
 
 ## Rate Limiting
 
-One front-edge limiter covers every request, including open and protected APIs, preflights, blocked paths, the Realtime dashboard, and fallback responses. It uses a sliding window keyed by `{client_ip}`:
+One public-edge limiter covers every external request, including open and protected APIs, preflights, blocked paths, the Realtime dashboard, and fallback responses. Internal requests through `gateway:8080` are exempt. Public limiting uses a sliding window keyed by `{client_ip}`:
 
 - `GATEWAY_RATE_LIMIT_EVENTS`, default `100`
 - `GATEWAY_RATE_LIMIT_WINDOW`, default `1s`

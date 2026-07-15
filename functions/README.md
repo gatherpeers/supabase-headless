@@ -180,8 +180,10 @@ Never use the service-role client for a public handler without an authorization 
 
 - `SUPABASE_URL`: internal gateway URL, currently `http://gateway:8080`.
 - `SUPABASE_PUBLIC_URL`: browser-facing API URL.
-- `SUPABASE_ANON_KEY`: internal asymmetric anon JWT.
-- `SUPABASE_SERVICE_ROLE_KEY`: internal asymmetric service-role JWT.
+- `SUPABASE_ANON_KEY`: legacy HS256 anon API key used by the shared client helpers.
+- `SUPABASE_SERVICE_ROLE_KEY`: legacy HS256 service-role API key used by the admin client helper.
+- `SUPABASE_PUBLISHABLE_KEYS`: JSON map containing the opaque publishable key.
+- `SUPABASE_SECRET_KEYS`: JSON map containing the opaque secret key.
 
 The loader forwards the container environment to every worker. Add application-specific secrets only when every function in that container is allowed to see them, or split sensitive functions into a separate deployment.
 
