@@ -230,7 +230,7 @@ services:
       # Max 63 chars total: supabase_realtime_messages_replication_slot_ (45) + suffix (≤18).
       SLOT_NAME_SUFFIX: ${REALTIME_SLOT_NAME_SUFFIX:-local}
       SEED_SELF_HOST: "true"
-      SELF_HOST_TENANT_NAME: ${PUBLIC_API_DOMAIN}
+      SELF_HOST_TENANT_NAME: ${REALTIME_TENANT_ID:-realtime-dev}
 
       # Dashboard
       DASHBOARD_AUTH: ${REALTIME_DASHBOARD_AUTH:-basic_auth}
@@ -475,7 +475,7 @@ services:
         condition: service_healthy
     environment:
       # Supabase client (injected into user functions)
-      SUPABASE_URL: http://gateway
+      SUPABASE_URL: http://gateway:8080
       SUPABASE_PUBLIC_URL: ${PUBLIC_API_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY_ASYMMETRIC}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY_ASYMMETRIC}
@@ -522,6 +522,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -533,7 +534,7 @@ services:
       CADDY_LOG_LEVEL: ${CADDY_LOG_LEVEL:-WARN}
 
       # CORS / rate limit
-      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-*}
       GATEWAY_RATE_LIMIT_EVENTS: ${GATEWAY_RATE_LIMIT_EVENTS:-100}
       GATEWAY_RATE_LIMIT_WINDOW: ${GATEWAY_RATE_LIMIT_WINDOW:-1s}
       REQUEST_ID_HEADER: ${REQUEST_ID_HEADER:-X-Request-ID}
@@ -545,8 +546,9 @@ services:
       STORAGE_PREFIX: ${STORAGE_PREFIX:-/storage/v1}
       FUNCTIONS_PREFIX: ${FUNCTIONS_PREFIX:-/functions/v1}
       REALTIME_DASHBOARD_PREFIX: ${REALTIME_DASHBOARD_PREFIX:-/admin}
+      REALTIME_TENANT_ID: ${REALTIME_TENANT_ID:-realtime-dev}
 
-      # API key translation: opaque sb_* keys -> internal asymmetric JWTs, plus accept-list of asymmetric (*_ASYMMETRIC) and legacy (ANON_KEY / SERVICE_ROLE_KEY HS256) JWTs that pass through the gateway untouched. The `:-__unset_*__` defaults ensure each map input stays unique even when an env var is unset or empty (Caddy's `map` directive rejects duplicate inputs at config-load time, and an empty string for two rows would collide).
+      # API key translation: opaque sb_* keys -> internal asymmetric JWTs. Distinct sentinels keep Caddy map inputs unique when keys are blank; the gateway rejects every sentinel before lookup, preserving upstream-compatible legacy-only mode without exposing placeholder credentials.
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-__unset_publishable_key__}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-__unset_secret_key__}
       ANON_KEY_ASYMMETRIC: ${ANON_KEY_ASYMMETRIC:-__unset_anon_key_asymmetric__}

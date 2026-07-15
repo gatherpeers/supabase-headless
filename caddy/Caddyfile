@@ -1,14 +1,15 @@
 {
 	email {$CADDY_CONTACT_EMAIL}
 	skip_install_trust
+	persist_config off
 	log {
 		level {$CADDY_LOG_LEVEL}
 	}
 
-	# Server-wide options. When running behind a CDN/L7 proxy (Cloudflare, Fastly, ALB, …) uncomment `trusted_proxies` so Caddy parses the real client IP out of forwarded headers; this also makes {client_ip}, rate_limit, GOTRUE_SECURITY_SB_FORWARDED_FOR_ENABLED, and access logs use the actual visitor IP instead of the immediate Docker peer. `private_ranges` already covers RFC1918 + ::1; replace or extend with the CDN's public ranges as needed.
+	# When running behind a CDN/L7 proxy, configure only that proxy's actual CIDRs. Do not trust `private_ranges` broadly when direct traffic can reach a Docker/NAT peer, or clients may spoof forwarded addresses. Strict right-to-left parsing matches proxies that append X-Forwarded-For.
 	# https://caddyserver.com/docs/caddyfile/options#trusted-proxies
 	servers {
-		# trusted_proxies static private_ranges
+		# trusted_proxies static <proxy-cidr> [<proxy-cidr>...]
 		# trusted_proxies_strict
 		# client_ip_headers X-Forwarded-For CF-Connecting-IP
 	}
@@ -35,7 +36,7 @@
 #  - X-Request-ID: REQUEST_ID_HEADER and access-log correlation.
 (forwarded_headers) {
 	header_up X-Real-IP {client_ip}
-	header_up {$REQUEST_ID_HEADER} {request_id}
+	header_up {$REQUEST_ID_HEADER} {http.request.uuid}
 }
 
 # Resolves the Apikey header to the matching internal asymmetric JWT. Mirrors the combined effect of Envoy's "translate apikey in header" Lua filter and the accept-list inside the "401 for missing/invalid API key" filter:
@@ -52,8 +53,14 @@
 #   {_role}              = "anon" | "service_role" | ""
 # An empty role means "no recognised key supplied" (missing, invalid, or AWS SigV4). Subsequent snippets read these directly via the `vars` matcher's placeholder form (canonical Caddy idiom, see https://caddyserver.com/docs/caddyfile/matchers#vars).
 #
-# compose.yml passes a unique unmatchable sentinel for any blank key ("__unset_<name>__"), so the map's input-uniqueness check holds even when legacy keys are not configured. Real Apikey headers never collide with the sentinels.
+# compose passes distinct sentinels for blank keys so the map remains valid in upstream-compatible legacy-only mode. The guard rejects every sentinel before any route can translate or authorize it.
 (api_key_lookup) {
+	@unset_config_key expression `{http.request.header.Apikey} == "__unset_publishable_key__" || {http.request.header.Apikey} == "__unset_secret_key__" || {http.request.header.Apikey} == "__unset_anon_key_asymmetric__" || {http.request.header.Apikey} == "__unset_service_role_key_asymmetric__" || {http.request.header.Apikey} == "__unset_legacy_anon_key__" || {http.request.header.Apikey} == "__unset_legacy_service_role_key__"`
+	handle @unset_config_key {
+		header Content-Type "application/json"
+		respond `{"message":"No API key found in request"}` 401
+	}
+
 	map {http.request.header.Apikey} {_translated_apikey} {_role} {
 		"{$SUPABASE_PUBLISHABLE_KEY}" "{$ANON_KEY_ASYMMETRIC}" "anon"
 		"{$SUPABASE_SECRET_KEY}" "{$SERVICE_ROLE_KEY_ASYMMETRIC}" "service_role"
@@ -89,13 +96,13 @@
 	request_header @translate_has_known_key Apikey {_translated_apikey}
 }
 
-# Mirrors Envoy's "translate apikey in query" Lua filter (lines 594-712). Required for the Realtime WebSocket route where browsers carry the key in the URL. Caddy `uri ... query` is regex find/replace; the pattern matches "apikey=" followed by any non-"&" characters (safe — both opaque keys and base64url JWTs contain only URL-safe characters).
+# Mirrors Envoy's "translate apikey in query" Lua filter (lines 594-712). Required for Realtime WebSocket clients that carry the key in the URL. Caddy query-value replacement takes three arguments: parameter, search regex, replacement.
 (translate_apikey_query) {
 	@known_key_in_query {
 		expression `{http.request.uri.query.apikey} != ""`
 		not vars {_role} ""
 	}
-	uri @known_key_in_query query "apikey=[^&]+" "apikey={_translated_apikey}"
+	uri @known_key_in_query query apikey "^.*$" "{_translated_apikey}"
 }
 
 # Mirrors Envoy's "synth Authorization" Lua filter (lines 796-862). Synthesizes `Authorization: Bearer <internal asymmetric JWT>` when the client did not send a real bearer token of its own.
@@ -137,15 +144,32 @@
 }
 
 # ============================================================================
-# Public site
+# Public HTTPS site plus an internal-only HTTP listener. Compose publishes only 80/443, so :8080 is reachable from Docker networks but not from the host.
 # ============================================================================
-{$PUBLIC_API_DOMAIN}, http://gateway {
+{$PUBLIC_API_DOMAIN}, http://gateway:8080 {
 	encode zstd gzip
 
 	log {
 		output file /var/log/caddy/access.log {
 			roll_size 50mb
 			roll_keep 3
+		}
+		format filter {
+			wrap json
+			request>headers>Apikey delete
+			request>headers>X-Api-Key delete
+			request>headers>X-Signature delete
+			request>uri query {
+				replace apikey REDACTED
+				replace token REDACTED
+				replace token_hash REDACTED
+				replace code REDACTED
+				replace access_token REDACTED
+				replace refresh_token REDACTED
+				replace X-Amz-Credential REDACTED
+				replace X-Amz-Signature REDACTED
+				replace X-Amz-Security-Token REDACTED
+			}
 		}
 	}
 
@@ -155,23 +179,28 @@
 	header {
 		defer
 		Access-Control-Allow-Origin "{$CORS_ALLOWED_ORIGIN}"
-		Access-Control-Expose-Headers "tus-resumable, upload-offset, upload-length, location, x-upsert"
+		Access-Control-Expose-Headers "*"
+		{$REQUEST_ID_HEADER} "{http.request.uuid}"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
-		X-XSS-Protection "1; mode=block"
+		-Server
 	}
 
 	# Top-level route block enforces source-order matching for the handle blocks below (open routes must be checked before the protected /auth/v1/* catch-all, /realtime/v1/api/* before /realtime/v1/*, etc.).
 	route {
+		# One limiter instance covers every request, including invalid keys, preflights, blocked paths, the admin dashboard, and fallback responses.
+		import api_rate_limit
+
 		# ============================================================
 		# CORS preflight
 		# Access-Control-Allow-Origin and Access-Control-Expose-Headers are emitted by the outer `header { defer ... }` block for every response (including this 204), so they are not repeated here.
 		# ============================================================
 		@options method OPTIONS
 		handle @options {
-			header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"
-			header Access-Control-Allow-Headers "Origin, Accept, Accept-Profile, Authorization, Content-Type, Content-Profile, apikey, x-client-info, prefer, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert, x-signature"
+			header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD, CONNECT, TRACE"
+			# Match Kong's forward-compatible behavior by echoing the browser's requested header names.
+			header Access-Control-Allow-Headers "{http.request.header.Access-Control-Request-Headers}"
 			header Access-Control-Max-Age "3600"
 			respond 204
 		}
@@ -188,7 +217,6 @@
 		@auth_open path {$AUTH_PREFIX}/verify {$AUTH_PREFIX}/verify/* {$AUTH_PREFIX}/callback {$AUTH_PREFIX}/callback/* {$AUTH_PREFIX}/authorize {$AUTH_PREFIX}/authorize/* {$AUTH_PREFIX}/.well-known/jwks.json
 		handle @auth_open {
 			uri strip_prefix {$AUTH_PREFIX}
-			import api_rate_limit
 			reverse_proxy auth:9999 {
 				import forwarded_headers
 				header_up X-Forwarded-Prefix {$AUTH_PREFIX}
@@ -198,7 +226,6 @@
 		# well-known-oauth -> auth:9999/.well-known/oauth-authorization-server (RFC 8414)
 		@oauth_meta path /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/*
 		handle @oauth_meta {
-			import api_rate_limit
 			reverse_proxy auth:9999 {
 				import forwarded_headers
 				header_up X-Forwarded-Prefix /.well-known/oauth-authorization-server
@@ -211,7 +238,6 @@
 		@sso_saml path {$AUTH_PREFIX}/sso/saml/acs {$AUTH_PREFIX}/sso/saml/acs/* {$AUTH_PREFIX}/sso/saml/metadata {$AUTH_PREFIX}/sso/saml/metadata/*
 		handle @sso_saml {
 			uri strip_prefix {$AUTH_PREFIX}
-			import api_rate_limit
 			reverse_proxy auth:9999 {
 				import forwarded_headers
 				header_up X-Forwarded-Prefix {$AUTH_PREFIX}
@@ -230,7 +256,6 @@
 				import reject_invalid_apikey
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				reverse_proxy auth:9999 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix {$AUTH_PREFIX}/
@@ -253,7 +278,6 @@
 				}
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				rewrite * /
 				reverse_proxy rest:3000 {
 					import forwarded_headers
@@ -270,7 +294,6 @@
 				import reject_invalid_apikey
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				reverse_proxy rest:3000 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix {$REST_PREFIX}/
@@ -291,7 +314,6 @@
 				import reject_invalid_apikey
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				reverse_proxy rest:3000 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix /graphql/v1
@@ -324,9 +346,9 @@
 				import reject_invalid_apikey
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				reverse_proxy realtime:4000 {
 					import forwarded_headers
+					header_up Host {$REALTIME_TENANT_ID}
 					header_up X-Forwarded-Prefix {$REALTIME_PREFIX}/api
 				}
 			}
@@ -345,10 +367,10 @@
 				import translate_apikey_header
 				import translate_apikey_query
 				import mirror_x_api_key
-				import api_rate_limit
 				rewrite * /socket{uri}
 				reverse_proxy realtime:4000 {
 					import forwarded_headers
+					header_up Host {$REALTIME_TENANT_ID}
 					header_up X-Forwarded-Prefix {$REALTIME_PREFIX}/
 				}
 			}
@@ -367,7 +389,6 @@
 				import translate_apikey_query
 				import translate_apikey_header
 				import synth_authorization
-				import api_rate_limit
 				reverse_proxy storage:5000 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix {$STORAGE_PREFIX}
@@ -387,7 +408,6 @@
 		# Edge Runtime handles its own auth; pass apikey and Authorization through untouched. The translation chain is fully skipped here, the same way Envoy skips it on /functions/v1/.
 		handle_path {$FUNCTIONS_PREFIX}/* {
 			route {
-				import api_rate_limit
 				reverse_proxy functions:9000 {
 					import forwarded_headers
 					header_up X-Forwarded-Prefix {$FUNCTIONS_PREFIX}/
@@ -414,7 +434,6 @@
 		# 		}
 		# 		import translate_apikey_header
 		# 		import synth_authorization
-		# 		import api_rate_limit
 		# 		reverse_proxy postgres-meta:8080 {
 		# 			import forwarded_headers
 		# 			header_up X-Forwarded-Prefix /pg/
@@ -435,7 +454,7 @@
 		# Mirrors Envoy's catch-all `/` -> studio route with basic auth and inbound `Authorization` stripped. Add the `studio` service to compose.yml and define STUDIO_BASIC_AUTH_USER / STUDIO_BASIC_AUTH_PASSWORD_HASH in .env first. Place this block as the LAST handle (above the fallback) — it must not shadow the API routes above.
 		#
 		# handle {
-		# 	basicauth {
+		# 	basic_auth {
 		# 		{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_PASSWORD_HASH}
 		# 	}
 		# 	request_header -Authorization

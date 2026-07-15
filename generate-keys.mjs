@@ -90,10 +90,16 @@ function signHS256(secret, payload) {
 	return `${data}.${sig}`
 }
 
+const SELF_HOSTED_PROJECT_REF = 'supabase-self-hosted'
+
 function generateOpaqueKey(prefix) {
 	const random = crypto.randomBytes(17).toString('base64url').slice(0, 22)
 	const intermediate = prefix + random
-	const checksum = crypto.createHash('sha256').update(intermediate).digest('base64url').slice(0, 8)
+	const checksum = crypto
+		.createHash('sha256')
+		.update(`${SELF_HOSTED_PROJECT_REF}|${intermediate}`)
+		.digest('base64url')
+		.slice(0, 8)
 	return `${intermediate}_${checksum}`
 }
 

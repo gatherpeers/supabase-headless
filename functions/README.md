@@ -172,13 +172,13 @@ Never use the service-role client for a public handler without an authorization 
 - `requireEnv(name)`: fail fast on missing environment variables.
 - `json(body, statusOrInit)`: JSON response helper.
 
-`SUPABASE_URL` is `http://gateway`, so function-to-Supabase calls stay inside Docker networking. `storage.getPublicUrl()` is computed client-side by `supabase-js`; use `createPublicUrlClient()` when a function needs to return browser-facing Storage URLs.
+`SUPABASE_URL` is `http://gateway:8080`, so function-to-Supabase calls stay on the gateway's unexported Docker-network listener. `storage.getPublicUrl()` is computed client-side by `supabase-js`; use `createPublicUrlClient()` when a function needs to return browser-facing Storage URLs.
 
 ## Environment
 
 [compose.yml](../compose.yml) defines these Supabase variables for the Functions container:
 
-- `SUPABASE_URL`: internal gateway URL, currently `http://gateway`.
+- `SUPABASE_URL`: internal gateway URL, currently `http://gateway:8080`.
 - `SUPABASE_PUBLIC_URL`: browser-facing API URL.
 - `SUPABASE_ANON_KEY`: internal asymmetric anon JWT.
 - `SUPABASE_SERVICE_ROLE_KEY`: internal asymmetric service-role JWT.

@@ -1,6 +1,6 @@
 # Gateway (Caddy)
 
-`gateway` is the only public entry point for the stack — and the only process that publishes host ports. It replaces Kong/Envoy with a single, reviewable [Caddy](https://caddyserver.com/) configuration: automatic TLS, route matching, prefix rewrites, CORS, sliding-window rate limits, access logs, security headers, and modern Supabase `sb_*` API-key translation.
+`gateway` is the only public entry point for the stack — and the only process that publishes host ports. It replaces Kong/Envoy with a single, reviewable [Caddy](https://caddyserver.com/) configuration: automatic TLS and HTTP/3, route matching, prefix rewrites, CORS, sliding-window rate limits, access logs, security headers, and modern Supabase `sb_*` API-key translation.
 
 Where the official self-hosted stack keeps Kong (or Envoy) as the API gateway and optionally puts Caddy in front for TLS, Headless makes Caddy the gateway. One config file, one public edge, backends stay on an internal Docker network.
 
@@ -39,6 +39,8 @@ Accepted keys:
 - `ANON_KEY_ASYMMETRIC` and `SERVICE_ROLE_KEY_ASYMMETRIC` pass through for internal callers.
 - Legacy HS256 `ANON_KEY` and `SERVICE_ROLE_KEY` pass through for migration compatibility.
 
+Blank key variables are represented internally by distinct map sentinels, but Caddy rejects those values before lookup. This preserves upstream-compatible legacy-only operation without making a predictable placeholder usable as an API key. Locally generated opaque keys use Supabase's `supabase-self-hosted|<key>` checksum input; the gateway still treats the complete key as an opaque literal, like upstream.
+
 Storage and Functions intentionally do not require a gateway API-key check. Storage must accept signed URLs and AWS SigV4 requests; Functions perform their own handler-level authorization. When Storage does include a recognized key, Caddy translates it but does not overwrite AWS SigV4 `Authorization` headers.
 
 ## Default Routes
@@ -60,6 +62,8 @@ Storage and Functions intentionally do not require a gateway API-key check. Stor
 
 `/realtime/v1/admin/*` redirects to `/admin/*`. Realtime tenant-management endpoints are blocked at the gateway to match the upstream hardening in [supabase/supabase#46856](https://github.com/supabase/supabase/pull/46856).
 
+Realtime seeding and proxied API/WebSocket requests share the stable `REALTIME_TENANT_ID` value. Caddy rewrites the upstream `Host` header to this identifier so Realtime resolves the same tenant regardless of the public API domain.
+
 Treat `/admin/*` as an administrative surface. Keep `REALTIME_DASHBOARD_PASSWORD` strong and add network-level protection for production deployments when possible.
 
 Commented optional routes in [Caddyfile](./Caddyfile) include `/pg/*` for `postgres-meta`, `/api/mcp`, and a Studio catch-all. They are documented for parity but are not enabled by [compose.yml](../compose.yml).
@@ -75,6 +79,12 @@ Options:
 - **`*`** (default): any browser origin may call the API with bearer tokens. Matches upstream.
 - **A single concrete origin** (e.g. `${APP_URL}`): a mild hardening that also blocks other browser origins at the CORS layer. No `Vary: Origin` is needed because the emitted origin is static.
 
+Preflight responses echo `Access-Control-Request-Headers`, matching Kong's forward-compatible behavior, and expose all response headers as in Envoy. Because credentialed CORS is disabled, the wildcard exposed-header value retains its wildcard meaning.
+
+## Internal Gateway URL
+
+Public clients use HTTPS on ports `443/tcp` (HTTP/1.1 and HTTP/2) or `443/udp` (HTTP/3). Edge Functions use `http://gateway:8080` on Docker networking to avoid a TLS round trip without opening a plaintext path on the published public listener. Port `8080` is not published to the host.
+
 ## Auth Email Templates
 
 [Caddyfile](./Caddyfile) can serve GoTrue mailer templates internally on `:8081` under `/mailer/*`. This is not wired by default; [compose.yml](../compose.yml) does not mount an `auth/mailer` directory.
@@ -89,13 +99,13 @@ Port `8081` is not published to the host. Only services that can reach the inter
 
 ## CDN / Reverse Proxy
 
-When Caddy is behind Cloudflare, Fastly, an ALB, or another Layer 7 proxy, configure `trusted_proxies` in the global `servers` block. This makes `{client_ip}`, rate limits, `X-Real-IP`, Auth forwarded-for handling, and access logs use the real visitor IP instead of the Docker peer.
+When Caddy is behind Cloudflare, Fastly, an ALB, or another Layer 7 proxy, configure only that proxy's actual CIDRs in the global `servers` block and enable `trusted_proxies_strict` for proxies that append `X-Forwarded-For`. Do not broadly trust all private ranges when direct traffic can reach a Docker/NAT peer. Correct trust configuration makes `{client_ip}`, rate limits, `X-Real-IP`, Auth forwarded-for handling, and access logs use the real visitor IP instead of the Docker peer.
 
 On Linux with Caddy binding host ports `80` and `443`, consider setting Docker `userland-proxy: false` to preserve client IPs more reliably.
 
 ## Rate Limiting
 
-The gateway uses a sliding window keyed by `{client_ip}`:
+One front-edge limiter covers every request, including open and protected APIs, preflights, blocked paths, the Realtime dashboard, and fallback responses. It uses a sliding window keyed by `{client_ip}`:
 
 - `GATEWAY_RATE_LIMIT_EVENTS`, default `100`
 - `GATEWAY_RATE_LIMIT_WINDOW`, default `1s`
@@ -104,7 +114,7 @@ Exceeded requests return `429`.
 
 ## Logging
 
-Access logs are written to `./logs/caddy/access.log` through the `/var/log/caddy` bind mount. Log rotation is configured in [Caddyfile](./Caddyfile).
+Access logs are written to `./logs/caddy/access.log` through the `/var/log/caddy` bind mount. Log rotation is configured in [Caddyfile](./Caddyfile). Caddy records the generated request `uuid`, returns it through `REQUEST_ID_HEADER`, and forwards the same value upstream. API-key/signature headers and sensitive query parameters are removed or redacted before encoding the log entry; Caddy also redacts `Authorization` and cookies by default.
 
 ## Validate / Format
 
