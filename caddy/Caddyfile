@@ -102,7 +102,7 @@
 		expression `{http.request.uri.query.apikey} != ""`
 		not vars {_role} ""
 	}
-	uri @known_key_in_query query apikey "^.*$" "{_translated_apikey}"
+	uri @known_key_in_query query apikey "{_translated_apikey}"
 }
 
 # Mirrors Envoy's "synth Authorization" Lua filter (lines 796-862). Synthesizes `Authorization: Bearer <internal asymmetric JWT>` when the client did not send a real bearer token of its own.
