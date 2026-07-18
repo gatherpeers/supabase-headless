@@ -109,6 +109,7 @@ Internal services are not published on the host. In production, the firewall sho
 
 ## Repository Docs
 
+- [VENDORING.md](./VENDORING.md): use this stack from an app repo (submodule init, bare-minimum compose, overrides, pin bumps).
 - [caddy/README.md](./caddy/README.md): gateway behavior, routes, API-key translation, CORS, CDN notes.
 - [db/README.md](./db/README.md): bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules.
 - [functions/README.md](./functions/README.md): Edge Runtime loader, function layout, shared Supabase clients.
@@ -145,16 +146,9 @@ Startup order is intentionally strict: `db` and upstream APIs become healthy, `d
 
 ## Vendoring In An App
 
-This repository is designed to be vendored into an application repository, for example as a Git submodule. The base stack owns platform wiring; the application owns project SQL and functions.
+This repository is designed to be vendored into an application repository as a Git submodule. The base stack owns platform wiring; the application owns project SQL, functions, secrets, and compose overrides.
 
-Typical application-specific overrides:
-
-- Mount app migrations into `db/app/migrations`.
-- Mount app Edge Functions into `functions/app` (or replace that mount with your own function tree).
-- Override domains, SMTP/OAuth settings, CORS, resource limits, and storage policy through `.env` or compose overrides.
-- Keep stack migrations separate from app migrations so upstream compatibility fixes remain reviewable.
-
-Application schema belongs in numbered SQL files such as `db/app/migrations/001_create_profiles.sql`. Do not edit an applied migration file; add a new migration instead.
+The bare minimum is an app-root `compose.yml` that only includes this compose file, plus a root `.env` generated from [.env.example](.env.example). Full init, pin-bump, command-prefix, and override guidance: [VENDORING.md](./VENDORING.md).
 
 ## Local HTTPS
 
