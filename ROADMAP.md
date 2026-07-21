@@ -25,6 +25,7 @@ The product focus stays fixed: a lean, SDK-compatible Supabase data plane that o
 - External Postgres and/or S3-compatible storage for deployments that need independent scaling, managed backups, or cloud-native durability.
 - Rootless Podman as an alternative runtime for hosts that prefer daemonless containers and stronger process isolation.
 - `@supabase/server` in Edge Functions when its self-hosted story is stable enough.
+- Evaluate if removing realtime /admin/dashboard from public by default to reduce exposed surface.
 
 ## Non-Goals (On Purpose)
 
