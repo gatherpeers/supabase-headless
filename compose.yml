@@ -128,7 +128,7 @@ services:
       - private_net
 
   auth:
-    image: supabase/auth:v2.193.0
+    image: supabase/auth:v2.193.1
     logging: *default-logging
     container_name: supabase-auth
     restart: always
@@ -181,7 +181,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.116.1
+    image: supabase/realtime:v2.117.0
     logging: *default-logging
     container_name: supabase-realtime
     restart: always
@@ -325,7 +325,7 @@ services:
       start_period: 10s
 
   rustfs-createbucket:
-    image: rustfs/rc:v0.1.28
+    image: rustfs/rc:v0.1.29
     container_name: supabase-rustfs-createbucket
     restart: "no"
     security_opt:
@@ -390,7 +390,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.67.5
+    image: supabase/storage-api:v1.67.13
     logging: *default-logging
     container_name: supabase-storage
     restart: always
