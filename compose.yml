@@ -181,7 +181,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.117.0
+    image: supabase/realtime:v2.119.0
     logging: *default-logging
     container_name: supabase-realtime
     restart: always
