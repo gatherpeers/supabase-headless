@@ -113,7 +113,7 @@ Exceeded requests return `429`.
 
 ## Logging
 
-Access logs are written to `./logs/caddy/access.log` through the `/var/log/caddy` bind mount. Log rotation is configured in [Caddyfile](./Caddyfile). Caddy records the generated request `uuid`, returns it through `REQUEST_ID_HEADER`, and forwards the same value upstream. API-key/signature headers and sensitive query parameters are removed or redacted before encoding the log entry; Caddy also redacts `Authorization` and cookies by default.
+Access logs are written to `/var/log/caddy/access.log` inside the `caddy_logs` named volume (so vendored checkouts are not dirtied). Log rotation is configured in [Caddyfile](./Caddyfile). To read them on the host, remount `./logs/caddy:/var/log/caddy` from the app compose, or inspect with `docker compose exec gateway …`. Caddy records the generated request `uuid`, returns it through `REQUEST_ID_HEADER`, and forwards the same value upstream. API-key/signature headers and sensitive query parameters are removed or redacted before encoding the log entry; Caddy also redacts `Authorization` and cookies by default.
 
 ## Validate / Format
 

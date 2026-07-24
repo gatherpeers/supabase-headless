@@ -533,7 +533,8 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
-      - ./logs/caddy:/var/log/caddy
+      # Remount ./logs/caddy:/var/log/caddy from the vendored app compose for host files.
+      - caddy_logs:/var/log/caddy
     environment:
       # Server / TLS
       PUBLIC_API_DOMAIN: ${PUBLIC_API_DOMAIN}
@@ -576,6 +577,7 @@ volumes:
   db_data:
   rustfs_data:
   caddy_data:
+  caddy_logs:
 
 networks:
   public_net:

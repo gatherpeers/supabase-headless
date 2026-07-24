@@ -175,7 +175,7 @@ Loader contract and `@stack/*` imports: [functions/README.md](./functions/README
 
 **Auth / product env not in the base compose** — redeclare the `auth` (or other) service in the app compose and add the extra `environment:` entries.
 
-**Gateway logs on the app tree** — the base compose writes Caddy logs under the vendor `logs/` path. Remount if you want them in the app repo:
+**Gateway access logs on the host** — the base compose stores Caddy access logs in the `caddy_logs` named volume (not under the vendor tree). Remount only if you want files on the app host:
 
 ```yaml
 services:
