@@ -67,6 +67,8 @@ node vendor/supabase-headless/generate-keys.mjs --update-env
 docker compose up -d
 ```
 
+For local HTTPS, export the gateway CA to the **app** root (not into `vendor/`): `docker compose cp gateway:/data/caddy/pki/authorities/local/root.crt ./caddy-local-root.crt`
+
 Ignore `vendor/supabase-headless/.env` in the app `.gitignore`. The composed stack reads the **app root** `.env` only.
 
 Cloning an app that already vendors the stack:
@@ -208,7 +210,7 @@ my-app/
 └── vendor/supabase-headless/
 ```
 
-Keep platform secrets generation and type generation pointed at the vendor scripts; keep generated outputs (`database.types.ts`, local CA certs) in the app repo or gitignored as you prefer.
+Keep platform secrets and type generation pointed at the vendor scripts; keep generated outputs (`database.types.ts`, `caddy-local-root.crt`) in the app repo or gitignored as you prefer — never write them under `vendor/`.
 
 ## Related Docs
 
