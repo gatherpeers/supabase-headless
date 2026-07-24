@@ -11,7 +11,6 @@ services:
       context: ./db
       dockerfile: Dockerfile
     logging: *default-logging
-    container_name: supabase-db
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -67,7 +66,6 @@ services:
   # Automatic database migrations: stack -> app (if mounted by user). Runs psql, thus never starts a Postgres server.
   db-migrate:
     image: postgres:18.4-alpine
-    container_name: supabase-db-migrate
     restart: "no"
     security_opt:
       - "no-new-privileges:true"
@@ -102,7 +100,6 @@ services:
   # Isolated from the default compose, used to generate on-demand database types.
   postgres-meta:
     image: supabase/postgres-meta:v0.96.6
-    container_name: supabase-postgres-meta
     profiles: ['meta']
     restart: always
     security_opt:
@@ -130,7 +127,6 @@ services:
   auth:
     image: supabase/auth:v2.193.1
     logging: *default-logging
-    container_name: supabase-auth
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -183,7 +179,6 @@ services:
   realtime:
     image: supabase/realtime:v2.119.0
     logging: *default-logging
-    container_name: supabase-realtime
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -253,7 +248,6 @@ services:
   rest:
     image: postgrest/postgrest:v14.15
     logging: *default-logging
-    container_name: supabase-rest
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -294,7 +288,6 @@ services:
 
   rustfs:
     image: rustfs/rustfs:1.0.0-beta.9
-    container_name: supabase-rustfs
     restart: always
     logging: *default-logging
     security_opt:
@@ -326,7 +319,6 @@ services:
 
   rustfs-createbucket:
     image: rustfs/rc:v0.1.29
-    container_name: supabase-rustfs-createbucket
     restart: "no"
     security_opt:
       - "no-new-privileges:true"
@@ -343,7 +335,6 @@ services:
 
   imgproxy:
     image: darthsim/imgproxy:v4.0.11
-    container_name: supabase-imgproxy
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -392,7 +383,6 @@ services:
   storage:
     image: supabase/storage-api:v1.67.13
     logging: *default-logging
-    container_name: supabase-storage
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -464,7 +454,6 @@ services:
     build:
       context: ./functions
       dockerfile: Dockerfile
-    container_name: supabase-edge-functions
     restart: always
     security_opt:
       - "no-new-privileges:true"
@@ -503,7 +492,6 @@ services:
       context: ./caddy
       dockerfile: Dockerfile
     logging: *default-logging
-    container_name: supabase-gateway
     restart: always
     security_opt:
       - "no-new-privileges:true"
