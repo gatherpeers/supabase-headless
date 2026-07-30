@@ -26,14 +26,17 @@ apply_migrations() {
 
     name="${name_prefix}/${base}"
     checksum=$(sha256sum "$file" | awk '{print $1}')
-    existing=$(psql -tAc "SELECT checksum FROM ${meta_schema}.migration_history WHERE name = '${name}'" | tr -d '[:space:]')
+    existing=$(psql -v ON_ERROR_STOP=1 -v name="$name" -tAc \
+      "SELECT checksum FROM ${meta_schema}.migration_history WHERE name = :'name'" \
+      | tr -d '[:space:]')
 
     if [ -z "$existing" ]; then
       echo "Applying ${name}..."
       # Single transaction: the migration and its history row commit (or roll back) together.
       psql -v ON_ERROR_STOP=1 --single-transaction \
+        -v name="$name" -v checksum="$checksum" \
         -f "$file" \
-        -c "INSERT INTO ${meta_schema}.migration_history (name, checksum) VALUES ('${name}', '${checksum}');"
+        -c "INSERT INTO ${meta_schema}.migration_history (name, checksum) VALUES (:'name', :'checksum');"
     elif [ "$existing" != "$checksum" ]; then
       echo "Checksum mismatch for ${name} (stored=${existing} current=${checksum})" >&2
       exit 1
