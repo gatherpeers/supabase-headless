@@ -160,7 +160,7 @@ docker compose up -d functions
 Then review changes since the last tag and publish an annotated tag for consumers ([VENDORING.md](./VENDORING.md)):
 
 ```bash
-git log $(git describe --tags --abbrev=0)..HEAD --oneline
+git log $(git describe --tags --abbrev=0)^..HEAD --oneline
 git tag -a vX.Y.Z -m "Short description of the release"
 git push origin main
 git push origin vX.Y.Z
