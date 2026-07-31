@@ -16,20 +16,20 @@ It still does not blindly track `latest`: version numbers live in source files a
 
 ## Tags And Digests
 
-Explicit version tags such as `supabase/auth:v2.192.0` are usually enough for a self-hosted stack when upgrades are tested before deployment.
+Explicit version tags such as `supabase/auth:<tag>` are usually enough for a self-hosted stack when upgrades are tested before deployment.
 
 Use image digests when you need bit-identical pulls across hosts or compliance requires immutable artifacts:
 
 ```bash
-docker pull supabase/auth:v2.192.0
-docker inspect --format='{{index .RepoDigests 0}}' supabase/auth:v2.192.0
+docker pull supabase/auth:<tag>
+docker inspect --format='{{index .RepoDigests 0}}' supabase/auth:<tag>
 ```
 
 For images that only publish Docker Hub tags (notably `rustfs/rc`), confirm the pinned tag still matches `latest` by comparing digests before bumping:
 
 ```bash
 curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/latest" | sed -n 's/.*"digest": *"\([^"]*\)".*/\1/p' | head -1
-curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/v0.1.26" | sed -n 's/.*"digest": *"\([^"]*\)".*/\1/p' | head -1
+curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/<tag>" | sed -n 's/.*"digest": *"\([^"]*\)".*/\1/p' | head -1
 ```
 
 ## Upgrade Workflow
@@ -89,7 +89,7 @@ For Edge Functions and the SDK suite, check npm/JSR directly (Deno itself is bun
 - `@std/http` — `functions/index.ts` (JSR)
 
 ```bash
-docker run --rm --entrypoint sh supabase/edge-runtime:v1.74.2 -c 'deno --version'
+docker run --rm --entrypoint sh supabase/edge-runtime:<tag> -c 'deno --version'
 ```
 
 For the key-generation example image, use the current Node 24.x Alpine tag from [Docker Hub](https://hub.docker.com/_/node/tags) or [nodejs.org dist index](https://nodejs.org/dist/index.json).

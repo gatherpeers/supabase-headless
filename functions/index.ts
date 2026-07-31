@@ -1,7 +1,7 @@
 // @ts-ignore
 import { STATUS_CODE } from 'jsr:@std/http@1.1.2/status'
 import { context, propagation } from 'npm:@opentelemetry/api@1.9.1'
-import { W3CBaggagePropagator } from 'npm:@opentelemetry/core@2.9.0'
+import { W3CBaggagePropagator } from 'npm:@opentelemetry/core@2.10.0'
 import { json } from '@stack/json.ts'
 
 // @ts-ignore See https://github.com/denoland/deno/issues/28082

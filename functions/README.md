@@ -189,7 +189,7 @@ The loader forwards the container environment to every worker. Add application-s
 
 ## Dependencies
 
-Deno imports are pinned in source, for example `npm:@supabase/supabase-js@2.110.0` in [_shared/supabase.ts](./_shared/supabase.ts). Follow [MAINTENANCE.md](../MAINTENANCE.md) when bumping versions.
+Deno imports are pinned in source (see [_shared/supabase.ts](./_shared/supabase.ts)). Follow [MAINTENANCE.md](../MAINTENANCE.md) when bumping versions.
 
 ## Tests
 
