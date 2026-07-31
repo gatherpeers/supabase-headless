@@ -1,5 +1,7 @@
 # Dependency Maintenance
 
+**Audience:** maintainers of this repository (and forkers who change image or import pins). If you vendor the stack and only bump submodule tags, see [VENDORING.md](./VENDORING.md).
+
 Current-first is a product feature of this stack, not an accident of packaging. Because Headless omits Studio, analytics, and the Kong/Envoy coordination surface, PostgreSQL and the Supabase service images can usually be reviewed and upgraded faster than the full official self-hosted bundle. That makes it practical to adopt newer Auth, Realtime, Storage, PostgREST, and Edge Runtime releases between upstream compose bumps — when you choose to.
 
 It still does not blindly track `latest`: version numbers live in source files and every bump should be tested before deployment.
@@ -40,12 +42,12 @@ curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/<tag>" | sed -n 
      compose.yml */Dockerfile functions/ db/types-gen-ts.sh \
      scripts/supabase-js/package.json generate-keys.mjs
   ```
-2. Check each pin against upstream (see [Version check recipes](#version-check-recipes)).
+2. Check each pin against upstream (see [Version Check Recipes](#version-check-recipes)).
 3. Read upstream release notes and breaking-change notes.
 4. Cross-check the [official Supabase Docker versions](https://github.com/supabase/supabase/blob/master/docker/versions.md) for compatible service sets. Headless often runs ahead of that bundle — treat it as a compatibility hint, not a ceiling.
 5. Update source files (and `npm install` under `scripts/supabase-js` when the SDK pin changes).
 6. Add stack migrations for database compatibility changes that existing volumes must receive.
-7. Rebuild custom images with `docker compose build db gateway`.
+7. Rebuild custom images (`docker compose build db gateway`, and `functions` when the loader or imports changed).
 8. Start the stack with `docker compose up -d`.
 9. Run the SDK compatibility suite from `scripts/supabase-js`.
 
@@ -71,11 +73,11 @@ For the database image, check both the base tag and PGDG packages:
 - PGDG package versions (must match the base image’s major):
 
 ```bash
-docker run --rm postgres:18.4-trixie bash -c \
+docker run --rm postgres:<tag> bash -c \
   "apt-get update -qq && apt-cache madison postgresql-18 postgresql-18-postgis-3 postgresql-18-wal2json"
 ```
 
-Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. Keep `db-migrate` on the same PostgreSQL major/minor tag as the main database image.
+Use the same `postgres:<tag>` as [db/Dockerfile](./db/Dockerfile) (`*-trixie`). Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. Keep `db-migrate` on the same PostgreSQL major/minor tag as the main database image.
 
 For Caddy:
 
@@ -94,7 +96,7 @@ docker run --rm --entrypoint sh supabase/edge-runtime:<tag> -c 'deno --version'
 
 For the key-generation example image, use the current Node 24.x Alpine tag from [Docker Hub](https://hub.docker.com/_/node/tags) or [nodejs.org dist index](https://nodejs.org/dist/index.json).
 
-## Version check recipes
+## Version Check Recipes
 
 Use these when you want a fast current-vs-latest pass without opening every release page:
 
@@ -146,20 +148,20 @@ docker compose up -d functions
 
 ## Release Checklist
 
-- [ ] Every `image:` in [compose.yml](./compose.yml) has an explicit tag.
-- [ ] PGDG packages in [db/Dockerfile](./db/Dockerfile) are version-pinned.
-- [ ] Function imports use exact versions, not floating ranges.
-- [ ] `@supabase/supabase-js` matches across [functions/_shared/supabase.ts](./functions/_shared/supabase.ts) and [scripts/supabase-js/package.json](./scripts/supabase-js/package.json).
-- [ ] `POSTGREST_VERSION` in [db/types-gen-ts.sh](./db/types-gen-ts.sh) matches the `rest` image tag.
-- [ ] Stack database changes are delivered as numbered migrations.
-- [ ] `docker compose config` succeeds.
-- [ ] SDK compatibility tests pass, or failures are documented.
+- Every `image:` in [compose.yml](./compose.yml) has an explicit tag.
+- PGDG packages in [db/Dockerfile](./db/Dockerfile) are version-pinned.
+- Function imports use exact versions, not floating ranges.
+- `@supabase/supabase-js` matches across [functions/_shared/supabase.ts](./functions/_shared/supabase.ts) and [scripts/supabase-js/package.json](./scripts/supabase-js/package.json).
+- `POSTGREST_VERSION` in [db/types-gen-ts.sh](./db/types-gen-ts.sh) matches the `rest` image tag.
+- Stack database changes are delivered as numbered migrations.
+- `docker compose config` succeeds.
+- SDK compatibility tests pass, or failures are documented.
 
-## When To Wait
+Then review changes since the last tag and publish an annotated tag for consumers ([VENDORING.md](./VENDORING.md)):
 
-Wait rather than forcing an upgrade when:
-
-- PostGIS or `wal2json` packages are not available yet for the PostgreSQL tag.
-- A RustFS beta release has unreviewed storage-format or API changes.
-- A Supabase component release changes required environment variables or database migrations.
-- Applying the update would require editing already-applied migration files.
+```bash
+git log $(git describe --tags --abbrev=0)..HEAD --oneline
+git tag -a vX.Y.Z -m "Short description of the release"
+git push origin main
+git push origin vX.Y.Z
+```

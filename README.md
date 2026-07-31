@@ -41,7 +41,7 @@ Background: [Self-hosting: What's working (and what's not)?](https://github.com/
 | **Hardened by default** | Backends on an internal-only Docker network; OpenAPI root locked to `service_role`; Realtime tenant-admin routes blocked; Functions `/_internal` blocked |
 | **SQL as source of truth** | Fresh-volume bootstrap + checksum-tracked stack/app migrations; edits to applied files fail startup on purpose |
 | **Current-first pins** | PostgreSQL 18 and recent Auth / Realtime / Storage / Edge Runtime / PostgREST images, bumped deliberately (see [MAINTENANCE.md](./MAINTENANCE.md)) |
-| **App-owned overrides** | Vendor as a submodule; mount `db/app/migrations` and `functions/app` from your project |
+| **App-owned overrides** | Vendor as a submodule; mount app SQL and Edge Functions from your project ([VENDORING.md](./VENDORING.md)) |
 | **SDK regression suite** | [scripts/supabase-js](./scripts/supabase-js/) hits core Auth, database, Storage, Realtime, and Functions paths against a live stack (not every SDK method — OAuth/SMTP/SSO flows are skipped unless configured) |
 
 ## Compared To Official Self-Hosted Docker
@@ -63,7 +63,7 @@ Headless is not trying to win on Cloud or Studio feature parity. It wins on a sm
 
 The official self-hosted bundle moves carefully because Studio, analytics, gateway layers, and many services must stay coordinated. This repository keeps the runtime smaller, so PostgreSQL and the Supabase service images can be reviewed, bumped, rebuilt, and tested more directly. In practice that has meant newer Auth, Realtime, Storage, PostgREST, and Edge Runtime pins than the last full upstream `versions.md` service bump — but pins are chosen deliberately, not by chasing `latest`.
 
-Versions are still pinned in source and upgraded deliberately, not pulled from floating `latest` tags. See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow.
+Versions are still pinned in source and upgraded deliberately, not pulled from floating `latest` tags. Stack maintainers bump pins via [MAINTENANCE.md](./MAINTENANCE.md); apps that vendor this repo upgrade by bumping the submodule tag ([VENDORING.md](./VENDORING.md)).
 
 Track upstream changes through the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md). It is the source of truth for breaking changes, security fixes, and configuration updates that this repository mirrors (adapted to the Caddy gateway and the trimmed service set).
 
@@ -102,19 +102,19 @@ Only `gateway` publishes host ports (`80`, `443`). Every public API request ente
 
 ## Network Model
 
-- `private_net` is `internal: true` and contains the database, REST API, Realtime, Storage, RustFS, imgproxy, and internal gateway reachability.
-- `public_net` is limited to services that need outbound internet: `gateway` for ACME, `auth` for SMTP/OAuth, and `functions` for user-code `fetch()`.
+- `private_net` is `internal: true`. Every service joins it (Postgres and API backends, plus the gateway for internal calls such as Edge Functions → `http://gateway:8080`).
+- `public_net` is only for outbound internet: `gateway` (ACME), `auth` (SMTP/OAuth), and `functions` (user-code `fetch()`).
 
-Internal services are not published on the host. In production, the firewall should expose only `80`, `443`, and administrative access such as SSH. That is the security story in one sentence: **only the gateway publishes host ports; Auth, REST, Realtime, Storage, Postgres, and the rest stay on the internal Docker network.**
+No service except `gateway` publishes host ports. In production, the firewall should expose only `80`, `443`, and administrative access such as SSH. That is the security story in one sentence: **only the gateway publishes host ports; Auth, REST, Realtime, Storage, Postgres, and the rest stay on the internal Docker network.**
 
 ## Repository Docs
 
-- [VENDORING.md](./VENDORING.md): use this stack from an app repo (submodule init, bare-minimum compose, overrides, pin bumps).
-- [caddy/README.md](./caddy/README.md): gateway behavior, routes, API-key translation, CORS, CDN notes.
-- [db/README.md](./db/README.md): bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules.
-- [functions/README.md](./functions/README.md): Edge Runtime loader, function layout, shared Supabase clients.
-- [MAINTENANCE.md](./MAINTENANCE.md): dependency pinning and upgrade workflow.
-- [ROADMAP.md](./ROADMAP.md): planned operational work and non-goals.
+- [VENDORING.md](./VENDORING.md) — use this stack from an app repo (submodule init, bare-minimum compose, overrides, pin bumps)
+- [caddy/README.md](./caddy/README.md) — gateway behavior, routes, API-key translation, CORS, CDN notes
+- [db/README.md](./db/README.md) — bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules
+- [functions/README.md](./functions/README.md) — Edge Runtime loader, function layout, shared Supabase clients
+- [MAINTENANCE.md](./MAINTENANCE.md) — stack-maintainer dependency pins, upgrade recipes, and cutting release tags
+- [ROADMAP.md](./ROADMAP.md) — planned operational work and non-goals
 
 ---
 
@@ -235,7 +235,7 @@ Headless ships a lean default Auth surface so local bring-up stays simple. Produ
 - Keep `JWT_SECRET`, `JWT_KEYS`, `JWT_JWKS`, and API keys stable unless intentionally rotating credentials. `SUPABASE_SECRET_KEY` is server-only and maps to `service_role`.
 - Run `scripts/supabase-js` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
 - Never edit an applied migration file; checksum mismatches intentionally block startup.
-- Review the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) and upstream release notes before bumping service images.
+- Review the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) and upstream release notes before upgrading. Apps that vendor this repo bump the submodule tag ([VENDORING.md](./VENDORING.md)); stack maintainers bump image pins ([MAINTENANCE.md](./MAINTENANCE.md)).
 
 ## Useful Commands
 
@@ -248,4 +248,4 @@ docker compose --profile "*" pull && docker compose build
 docker run --rm node:24-alpine node -v
 ```
 
-See [MAINTENANCE.md](./MAINTENANCE.md) for the upgrade workflow and [db/README.md](./db/README.md) for migration rules.
+See [VENDORING.md](./VENDORING.md) to bump a vendored submodule pin, [MAINTENANCE.md](./MAINTENANCE.md) to change pins in this repo, and [db/README.md](./db/README.md) for migration rules.

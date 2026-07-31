@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL is the source of truth for this stack — not a dashboard. The database image is [postgres:18.4-trixie](https://hub.docker.com/_/postgres) with pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`. See [Dockerfile](./Dockerfile).
+PostgreSQL is the source of truth for this stack — not a dashboard. The database image is PostgreSQL 18 ([Dockerfile](./Dockerfile): official `postgres` tag plus pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`).
 
 Unlike the official self-hosted bundle's `supabase/postgres` image, this is a lean Postgres 18 build sized for the Headless data plane: the roles, schemas, and extensions Auth / PostgREST / Realtime / Storage need, without shipping the full Cloud extension suite (`pg_graphql`, `pg_cron`, Vault, and similar are not assumed). That keeps the image inspectable and upgradeable on a current major, at the cost of not mirroring every hosted Postgres feature out of the box.
 

@@ -59,8 +59,8 @@ The vendor tree needs function folders and an optional `_shared/` directory:
 ```text
 my-app/functions/
 ├── checkout-webhook/
-│   │── index.ts
-├───└── util.ts
+│   ├── index.ts
+│   └── util.ts
 └── _shared/
     └── billing.ts
 ```
@@ -107,7 +107,7 @@ These endpoints are for container-internal use. Caddy blocks `/functions/v1/_int
 
 ## Writing A Function
 
-Create `functions/app/<name>/index.ts` and export a default object with a `fetch` handler (the module worker contract used by Supabase Edge Functions, Cloudflare Workers, and Bun):
+Create `functions/app/<name>/index.ts` (or `functions/<name>/index.ts` when using the vendored mount above) and export a default object with a `fetch` handler (the module worker contract used by Supabase Edge Functions, Cloudflare Workers, and Bun):
 
 ```ts
 import { json } from '@stack/json.ts'
@@ -189,7 +189,7 @@ The loader forwards the container environment to every worker. Add application-s
 
 ## Dependencies
 
-Deno imports are pinned in source (see [_shared/supabase.ts](./_shared/supabase.ts)). Follow [MAINTENANCE.md](../MAINTENANCE.md) when bumping versions.
+Stack Deno imports are pinned in source (see [_shared/supabase.ts](./_shared/supabase.ts) and [index.ts](./index.ts)). Follow [MAINTENANCE.md](../MAINTENANCE.md) when bumping those pins. App function dependencies stay in the app repo.
 
 ## Tests
 

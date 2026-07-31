@@ -51,12 +51,12 @@ git init   # skip if the app repo already exists
 git submodule add https://github.com/gatherpeers/supabase-headless.git vendor/supabase-headless
 cd vendor/supabase-headless
 git fetch --tags
-git checkout v0.0.14   # pin a release tag; replace with the tag you want
+git checkout vX.Y.Z   # pin a release tag; replace with the tag you want
 cd ../..
 
 # Persist the pin in the parent repo
 git add .gitmodules vendor/supabase-headless
-git commit -m "Add supabase-headless submodule at v0.0.14"
+git commit -m "Add supabase-headless submodule at vX.Y.Z"
 ```
 
 Create the include compose file (see [Bare Minimum](#bare-minimum)), then:
@@ -102,20 +102,22 @@ When this repository publishes a new tag:
 ```bash
 cd vendor/supabase-headless
 git fetch --tags
-git checkout v0.0.14
+git checkout vX.Y.Z
 cd ../..
 
 git add vendor/supabase-headless
-git commit -m "Bump supabase-headless to v0.0.14"
+git commit -m "Bump supabase-headless to vX.Y.Z"
 git push origin main
 ```
 
 Before committing the pin:
 
-1. Read the vendor [README](./README.md) / [MAINTENANCE.md](./MAINTENANCE.md) and the upstream [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md).
+1. Read the vendor [README](./README.md), the tag/commit range you are moving across, and the upstream [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) for breaking changes this release may have mirrored.
 2. Diff env vars, gateway routes, function loader contracts, and stack migrations.
 3. Validate and restart from the app root: `docker compose config` then `docker compose up -d`.
 4. Rebuild the functions image if the loader or `@stack` helpers changed (`docker compose build functions`).
+
+Pin recipes and cutting headless tags live in [MAINTENANCE.md](./MAINTENANCE.md) (stack maintainers only).
 
 If `git checkout` fails because the submodule is dirty, you changed files under `vendor/`. Discard those edits (or move them into the app repo as overrides) and try again.
 
@@ -218,4 +220,4 @@ Keep platform secrets and type generation pointed at the vendor scripts; keep ge
 - [db/README.md](./db/README.md) — migrations, RLS, types
 - [functions/README.md](./functions/README.md) — Edge Functions layout and vendoring mounts
 - [caddy/README.md](./caddy/README.md) — gateway, CORS, mailer templates
-- [MAINTENANCE.md](./MAINTENANCE.md) — image pins and upgrade workflow
+- [MAINTENANCE.md](./MAINTENANCE.md) — stack-maintainer dependency pins and cutting release tags (not required for submodule pin bumps)
