@@ -177,7 +177,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.121.2
+    image: supabase/realtime:v2.121.3
     logging: *default-logging
     restart: always
     security_opt:
@@ -381,7 +381,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.67.25
+    image: supabase/storage-api:v1.67.27
     logging: *default-logging
     restart: always
     security_opt:

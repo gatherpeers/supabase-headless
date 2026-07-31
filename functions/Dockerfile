@@ -1,4 +1,4 @@
-FROM supabase/edge-runtime:v1.74.2
+FROM supabase/edge-runtime:v1.74.3
 
 COPY index.ts deno.json /srv/functions-loader/
 COPY _shared/ /srv/functions-loader/_shared/
