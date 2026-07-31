@@ -2,6 +2,8 @@
 
 **Self-hosted Supabase for teams that ship SQL and SDKs — not dashboards.**
 
+> **Early development.** Foundations are still being decided. Compose layout, env contracts, migrations, gateway behavior and others can change without notice — **no backwards compatibility is guaranteed until reaching 1.0.0**. Expect a fast-moving surface while the stack settles.
+
 Supabase Headless is a small-footprint, production-oriented [Supabase](https://supabase.com/)-compatible API stack. It keeps the data plane your apps already talk to — Auth, PostgREST, Realtime, Storage, Image Transformation, and Edge Functions — and drops the platform chrome: Studio, Analytics, Logflare, Vector, Supavisor, Kong, and Envoy.
 
 Operate it like infrastructure, not like a product UI. Schema lives in checksum-locked SQL migrations. The public edge is a single [Caddy](https://caddyserver.com/) config. Your application can vendor this repo as a Git submodule and mount its own migrations and functions. Official [Supabase client SDKs](https://supabase.com/docs/reference) keep working against the same `/auth/v1`, `/rest/v1`, `/realtime/v1`, `/storage/v1`, and `/functions/v1` paths.
@@ -249,3 +251,7 @@ docker run --rm node:24-alpine node -v
 ```
 
 See [VENDORING.md](./VENDORING.md) to bump a vendored submodule pin, [MAINTENANCE.md](./MAINTENANCE.md) to change pins in this repo, and [db/README.md](./db/README.md) for migration rules.
+
+## Author
+
+Built by [Pau Serra Gutiérrez](https://pausg.dev).
