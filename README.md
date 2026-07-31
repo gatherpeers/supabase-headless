@@ -112,6 +112,7 @@ No service except `gateway` publishes host ports. In production, the firewall sh
 ## Repository Docs
 
 - [VENDORING.md](./VENDORING.md) — use this stack from an app repo (submodule init, bare-minimum compose, overrides, pin bumps)
+- [supabase-headless-app-template](https://github.com/gatherpeers/supabase-headless-app-template) — starter app repo with this stack already vendored
 - [caddy/README.md](./caddy/README.md) — gateway behavior, routes, API-key translation, CORS, CDN notes
 - [db/README.md](./db/README.md) — bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules
 - [functions/README.md](./functions/README.md) — Edge Runtime loader, function layout, shared Supabase clients
@@ -150,7 +151,9 @@ Startup order is intentionally strict: `db` and upstream APIs become healthy, `d
 
 This repository is designed to be vendored into an application repository as a Git submodule. The base stack owns platform wiring; the application owns project SQL, functions, secrets, and compose overrides.
 
-The bare minimum is an app-root `compose.yml` that only includes this compose file, plus a root `.env` generated from [.env.example](.env.example). Full init, pin-bump, command-prefix, and override guidance: [VENDORING.md](./VENDORING.md).
+The fastest path is the [supabase-headless-app-template](https://github.com/gatherpeers/supabase-headless-app-template): a ready app shell with this repo already pinned as `vendor/supabase-headless`.
+
+The bare minimum by hand is an app-root `compose.yml` that only includes this compose file, plus a root `.env` generated from [.env.example](.env.example). Full init, pin-bump, command-prefix, and override guidance: [VENDORING.md](./VENDORING.md).
 
 ## Local HTTPS
 

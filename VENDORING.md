@@ -17,6 +17,10 @@ Day-to-day stack operation (start, secrets, TLS, migrations rules, production ch
 
 Do **not** edit files under `vendor/supabase-headless` for product work. Those changes are wiped on the next pin bump, and a dirty submodule blocks a clean checkout of a new tag (Git will refuse or leave conflicts until you discard local vendor edits).
 
+## Starter Template
+
+For a ready-made app template shell, use [supabase-headless-app-template](https://github.com/gatherpeers/supabase-headless-app-template) instead of assembling the files below by hand.
+
 ## Bare Minimum
 
 The smallest working app layout is:
@@ -43,7 +47,7 @@ You do not need app migrations, custom functions, or auth overrides to boot. Unt
 
 ## First-Time Init
 
-From a new or existing app repository:
+Prefer cloning or using the [app template](https://github.com/gatherpeers/supabase-headless-app-template) when you want the typical product layout already wired. To vendor into an existing repo (or a minimal include-only shell) by hand:
 
 ```bash
 git init   # skip if the app repo already exists
