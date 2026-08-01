@@ -26,9 +26,13 @@ apply_migrations() {
 
     name="${name_prefix}/${base}"
     checksum=$(sha256sum "$file" | awk '{print $1}')
-    existing=$(psql -v ON_ERROR_STOP=1 -v name="$name" -tAc \
-      "SELECT checksum FROM ${meta_schema}.migration_history WHERE name = :'name'" \
-      | tr -d '[:space:]')
+
+    # psql expands :'vars' from -f/stdin but not from -c, so history SQL goes through stdin.
+    # No pipe either: without pipefail a failed psql would be masked by the pipeline's status.
+    existing=$(psql -v ON_ERROR_STOP=1 -v name="$name" -tA <<EOF
+SELECT checksum FROM ${meta_schema}.migration_history WHERE name = :'name'
+EOF
+)
 
     if [ -z "$existing" ]; then
       echo "Applying ${name}..."
@@ -36,7 +40,9 @@ apply_migrations() {
       psql -v ON_ERROR_STOP=1 --single-transaction \
         -v name="$name" -v checksum="$checksum" \
         -f "$file" \
-        -c "INSERT INTO ${meta_schema}.migration_history (name, checksum) VALUES (:'name', :'checksum');"
+        -f - <<EOF
+INSERT INTO ${meta_schema}.migration_history (name, checksum) VALUES (:'name', :'checksum');
+EOF
     elif [ "$existing" != "$checksum" ]; then
       echo "Checksum mismatch for ${name} (stored=${existing} current=${checksum})" >&2
       exit 1
