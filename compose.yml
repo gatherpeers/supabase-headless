@@ -381,7 +381,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.67.27
+    image: supabase/storage-api:v1.67.29
     logging: *default-logging
     restart: always
     security_opt:
