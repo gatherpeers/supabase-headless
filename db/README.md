@@ -35,7 +35,7 @@ It creates:
 - Ownership-only: `supabase_realtime_admin`, `dashboard_user` (stub for Realtime migrations)
 - Extensions: `pg_stat_statements`, `postgis`, `pgcrypto`
 - Publication: `supabase_realtime`
-- Default privileges for API roles on `public` and `storage`
+- Default privileges for API roles on `public` and `storage`; the `public` ones are revoked again by [stack migration `000`](./stack/migrations/000_revoke_public_default_privileges.sql) (see [Data API Exposure](#data-api-exposure))
 
 Do not put upgrade logic in `init.sql`. Existing deployments will not receive it. Use `stack/migrations/` for platform compatibility changes and `app/migrations/` for application schema.
 
@@ -47,7 +47,29 @@ PostgREST connects as `authenticator` and switches role per request based on the
 - `authenticated`: logged-in users.
 - `service_role`: server-side/admin requests; bypasses RLS.
 
-Default grants allow common operations to be attempted, but row access still depends on RLS policies. Application migrations should enable RLS and define policies explicitly for user-owned data.
+Grants and RLS are separate layers: grants decide whether a role can reach an object at all, RLS decides which rows it sees. Application migrations own both.
+
+### Data API Exposure
+
+Tables in `public` are not reachable through PostgREST until you grant privileges on them, matching the [Supabase platform default](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically). [Stack migration `000_revoke_public_default_privileges.sql`](./stack/migrations/000_revoke_public_default_privileges.sql) removes the bootstrap default privileges for `anon`, `authenticated`, and `service_role` on tables and sequences created by `postgres` in `public`. Only future objects are affected, so existing volumes keep working after an update.
+
+Example of granting and securing a table:
+
+```sql
+GRANT SELECT ON public.profiles TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
+GRANT ALL ON public.profiles TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.profiles_id_seq TO authenticated;  -- serial/identity columns only
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY ...
+```
+
+A missing grant returns PostgREST `42501` with the required `GRANT` in the error hint.
+
+Functions are the exception. Postgres grants `EXECUTE` on new functions to `PUBLIC` globally, and per-schema default privileges can only add to the global set, so this cannot be revoked for `public` alone ([ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html)). A function created in `public` is callable over `/rest/v1/rpc/` by `anon` unless you `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC`. Keep internal helpers out of `public`, or revoke per function.
+
+`storage`, `auth`, and `realtime` keep their default privileges; those schemas are owned by their services and are out of scope for the upstream change too.
 
 ## Auth Helper Functions
 
@@ -99,7 +121,7 @@ For vendored usage, mount project migrations into `db/app/migrations` and leave 
 - Prefer idempotent DDL where practical (`IF NOT EXISTS`, named constraints, guarded `DO` blocks).
 - Do not edit applied migration files; add a new migration.
 - Do not use non-transactional statements such as `CREATE INDEX CONCURRENTLY`, `VACUUM`, or explicit `BEGIN`/`COMMIT`.
-- Grant privileges explicitly for objects created by application roles or restored from dumps; `ALTER DEFAULT PRIVILEGES` only affects future objects created by the role it targets.
+- Grant privileges explicitly for every object that should be reachable through the Data API; `public` has no default grants, and `ALTER DEFAULT PRIVILEGES` only affects future objects created by the role it targets.
 - Create Storage buckets in app migrations when they are part of the application contract.
 - Reload PostgREST after manual DDL.
 
