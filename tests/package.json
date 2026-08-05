@@ -1,0 +1,20 @@
+{
+  "name": "@supabase-headless/tests",
+  "private": true,
+  "type": "module",
+  "main": "run.mjs",
+  "scripts": {
+    "test": "node .",
+    "test:sdk": "node . sdk",
+    "test:smoke": "node . smoke"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.888.0",
+    "@aws-sdk/lib-storage": "^3.888.0",
+    "@aws-sdk/s3-request-presigner": "^3.888.0",
+    "@supabase/supabase-js": "^2.112.1"
+  }
+}

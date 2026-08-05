@@ -14,8 +14,8 @@ The product focus stays fixed: a lean, SDK-compatible Supabase data plane that o
 
 ## Compatibility
 
-- Keep [scripts/supabase-js](./scripts/supabase-js/) coverage aligned with the current [@supabase/supabase-js](https://supabase.com/docs/reference/javascript/introduction) surface.
-- Add focused tests for Caddy API-key translation, Realtime blocked endpoints, Storage signed URLs, and Functions auth forwarding.
+- Keep the `sdk` suites in [tests](./tests/) aligned with the current [@supabase/supabase-js](https://supabase.com/docs/reference/javascript/introduction) surface.
+- Keep the `smoke` suites aligned with gateway key translation, Realtime/Functions hardening, Storage (large upload, signed URL, TUS), and Storage S3 protocol.
 - Track upstream Supabase breaking changes that affect self-hosted environment variables, database migrations, or gateway behavior.
 - Expand stack migrations when new Supabase-compatible SQL helpers or grants are required.
 

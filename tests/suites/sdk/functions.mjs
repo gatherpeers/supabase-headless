@@ -1,9 +1,10 @@
-import { runSdkSuite, signInTestUser } from '../lib.mjs'
+import { runChecks } from '../../lib/runner.mjs'
+import { signInTestUser } from '../../lib/sdk.mjs'
 
 export async function runFunctionsSuite(ctx) {
   const { anon, service } = ctx
 
-  return runSdkSuite('functions', [
+  return runChecks('sdk:functions', [
     ['functions.invoke', async () => {
       const { data, error } = await anon.functions.invoke('example1?name=sdk', { method: 'GET' })
       if (error) throw error
@@ -26,5 +27,5 @@ export async function runFunctionsSuite(ctx) {
       const { error } = await anon.functions.invoke('sdk-missing-fn')
       if (!error) throw new Error('expected error')
     }],
-  ])
+  ], { track: true })
 }

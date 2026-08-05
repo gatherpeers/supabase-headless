@@ -68,6 +68,8 @@ const FILL_SECRETS = [
 	{ key: 'REALTIME_DASHBOARD_PASSWORD', generate: () => randomHex(32) },
 	{ key: 'RUSTFS_ACCESS_KEY', generate: () => randomHex(20) },
 	{ key: 'RUSTFS_SECRET_KEY', generate: () => randomHex(32) },
+	{ key: 'S3_PROTOCOL_ACCESS_KEY_ID', generate: () => randomHex(16) },
+	{ key: 'S3_PROTOCOL_ACCESS_KEY_SECRET', generate: () => randomHex(32) },
 ]
 
 function signES256(privateKey, kid, payload) {

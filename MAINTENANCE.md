@@ -12,7 +12,7 @@ It still does not blindly track `latest`: version numbers live in source files a
 - PostgreSQL, PostGIS, and `wal2json`: [db/Dockerfile](./db/Dockerfile)
 - Caddy and `caddy-ratelimit`: [caddy/Dockerfile](./caddy/Dockerfile)
 - Deno/npm/jsr imports: [functions/](./functions/) (especially `index.ts` and `_shared/supabase.ts`)
-- SDK test dependency: [scripts/supabase-js/package.json](./scripts/supabase-js/package.json) — keep `@supabase/supabase-js` aligned with the functions pin
+- Test dependencies: [tests/package.json](./tests/package.json) — keep `@supabase/supabase-js` aligned with the functions pin
 - PostgREST type-generation compatibility: [db/types-gen-ts.sh](./db/types-gen-ts.sh)
 - Node image used for key generation examples: [generate-keys.mjs](./generate-keys.mjs) (and the looser `node:24-alpine` example in [README.md](./README.md))
 
@@ -40,16 +40,16 @@ curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/<tag>" | sed -n 
   ```bash
    rg 'image:|^FROM |npm:|jsr:|ENV .*VERSION|caddy-ratelimit@|POSTGREST_VERSION|node:[0-9]' \
      compose.yml */Dockerfile functions/ db/types-gen-ts.sh \
-     scripts/supabase-js/package.json generate-keys.mjs
+     tests/package.json generate-keys.mjs
   ```
 2. Check each pin against upstream (see [Version Check Recipes](#version-check-recipes)).
 3. Read upstream release notes and breaking-change notes.
 4. Cross-check the [official Supabase Docker versions](https://github.com/supabase/supabase/blob/master/docker/versions.md) for compatible service sets. Headless often runs ahead of that bundle — treat it as a compatibility hint, not a ceiling.
-5. Update source files (and `npm install` under `scripts/supabase-js` when the SDK pin changes).
+5. Update source files (and `npm install` under `tests` when the SDK pin changes).
 6. Add stack migrations for database compatibility changes that existing volumes must receive.
 7. Rebuild custom images (`docker compose build db gateway`, and `functions` when the loader or imports changed).
 8. Start the stack with `docker compose up -d`.
-9. Run the SDK compatibility suite from `scripts/supabase-js`.
+9. Run the integration suites from `tests` (`npm test`).
 
 Keep each dependency bump focused when possible. Related Supabase services may need to move together when release notes say so.
 
@@ -86,7 +86,7 @@ For Caddy:
 
 For Edge Functions and the SDK suite, check npm/JSR directly (Deno itself is bundled in `supabase/edge-runtime`):
 
-- `@supabase/supabase-js` — bump in both `functions/_shared/supabase.ts` and `scripts/supabase-js/package.json`
+- `@supabase/supabase-js` — bump in both `functions/_shared/supabase.ts` and `tests/package.json`
 - `@opentelemetry/api`, `@opentelemetry/core` — `functions/index.ts`
 - `@std/http` — `functions/index.ts` (JSR)
 
@@ -151,11 +151,11 @@ docker compose up -d functions
 - Every `image:` in [compose.yml](./compose.yml) has an explicit tag.
 - PGDG packages in [db/Dockerfile](./db/Dockerfile) are version-pinned.
 - Function imports use exact versions, not floating ranges.
-- `@supabase/supabase-js` matches across [functions/_shared/supabase.ts](./functions/_shared/supabase.ts) and [scripts/supabase-js/package.json](./scripts/supabase-js/package.json).
+- `@supabase/supabase-js` matches across [functions/_shared/supabase.ts](./functions/_shared/supabase.ts) and [tests/package.json](./tests/package.json).
 - `POSTGREST_VERSION` in [db/types-gen-ts.sh](./db/types-gen-ts.sh) matches the `rest` image tag.
 - Stack database changes are delivered as numbered migrations.
 - `docker compose config` succeeds.
-- SDK compatibility tests pass, or failures are documented.
+- Integration tests in [tests](./tests) pass (`npm test` runs both the SDK and smoke suites).
 
 Then review changes since the last tag and publish an annotated tag for consumers ([VENDORING.md](./VENDORING.md)):
 

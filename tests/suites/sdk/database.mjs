@@ -1,4 +1,5 @@
-import { formatError, reseed, runSdkSuite, signInTestUser } from '../lib.mjs'
+import { formatError, runChecks, sumTallies } from '../../lib/runner.mjs'
+import { reseed, signInTestUser } from '../../lib/sdk.mjs'
 
 export async function runDatabaseSuite(ctx) {
   const { anon, service } = ctx
@@ -186,14 +187,9 @@ export async function runDatabaseSuite(ctx) {
     }],
   ]
 
-  const r1 = await runSdkSuite('from() reads (anon)', readTests)
-  const r2 = await runSdkSuite('from() writes (authenticated)', mutateTests)
-  const r3 = await runSdkSuite('rpc', rpcTests)
-
-  return {
-    passed: r1.passed + r2.passed + r3.passed,
-    failed: r1.failed + r2.failed + r3.failed,
-    skipped: r1.skipped + r2.skipped + r3.skipped,
-    failures: [...r1.failures, ...r2.failures, ...r3.failures],
-  }
+  return sumTallies([
+    await runChecks('sdk:database — from() reads (anon)', readTests, { track: true }),
+    await runChecks('sdk:database — from() writes (authenticated)', mutateTests, { track: true }),
+    await runChecks('sdk:database — rpc', rpcTests, { track: true }),
+  ])
 }

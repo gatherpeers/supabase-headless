@@ -193,4 +193,4 @@ Stack Deno imports are pinned in source (see [_shared/supabase.ts](./_shared/sup
 
 ## Tests
 
-The SDK compatibility runner invokes [example1](./app/example1/index.ts) and [example2](./app/example2/index.ts) from [scripts/supabase-js](../scripts/supabase-js/).
+The integration suites invoke [example1](./app/example1/index.ts) and [example2](./app/example2/index.ts) from [tests](../tests/).

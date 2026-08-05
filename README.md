@@ -44,7 +44,7 @@ Background: [Self-hosting: What's working (and what's not)?](https://github.com/
 | **SQL as source of truth** | Fresh-volume bootstrap + checksum-tracked stack/app migrations; edits to applied files fail startup on purpose |
 | **Current-first pins** | PostgreSQL 18 and recent Auth / Realtime / Storage / Edge Runtime / PostgREST images, bumped deliberately (see [MAINTENANCE.md](./MAINTENANCE.md)) |
 | **App-owned overrides** | Vendor as a submodule; mount app SQL and Edge Functions from your project ([VENDORING.md](./VENDORING.md)) |
-| **SDK regression suite** | [scripts/supabase-js](./scripts/supabase-js/) hits core Auth, database, Storage, Realtime, and Functions paths against a live stack (not every SDK method — OAuth/SMTP/SSO flows are skipped unless configured) |
+| **SDK + smoke suites** | [tests](./tests/) hits core Auth, database, Storage, Realtime, and Functions paths through the SDK, plus HTTP-level gateway keys, hardening, Storage/TUS, and S3 protocol (not every SDK method — OAuth/SMTP/SSO flows are skipped unless configured) |
 
 ## Compared To Official Self-Hosted Docker
 
@@ -82,7 +82,7 @@ The goal is compatibility with the official Supabase client SDKs for the enabled
 
 Compatibility does **not** mean feature parity with Supabase Cloud or Studio. This stack deliberately excludes Studio, dashboard-managed schema editing, Supavisor, Logflare, Vector, Analytics, and platform-specific operations. It also uses a lean Postgres image (not the full `supabase/postgres` extension suite), so capabilities such as `pg_graphql` / `pg_cron` / Vault are not assumed unless you add them yourself.
 
-SDK coverage lives in `scripts/supabase-js` and should be run after dependency upgrades or gateway/auth changes.
+SDK and gateway coverage lives in `tests` and should be run after dependency upgrades or gateway/auth changes.
 
 ---
 
@@ -211,17 +211,25 @@ Credentials come from `REALTIME_DASHBOARD_USER` and `REALTIME_DASHBOARD_PASSWORD
 
 For internet-facing deployments, use a strong generated password and prefer an additional control such as VPN, IP allowlisting, or a private admin hostname. The route is convenient for operations but should be treated as an admin surface.
 
-## SDK Integration Tests
+## Integration Tests
 
-With the stack running. When `PUBLIC_API_DOMAIN=localhost`, complete [Local HTTPS](#local-https) first.
+One package in [tests](./tests/) holds both suites. Run it with the stack up; when `PUBLIC_API_DOMAIN=localhost`, complete [Local HTTPS](#local-https) first.
 
 ```bash
-cd scripts/supabase-js
+cd tests
 npm install
-npm test
+npm test                          # everything
+npm run test:sdk                  # or: node . sdk
+npm run test:smoke                # or: node . smoke
+node . sdk:storage smoke:s3       # individual suites
 ```
 
-The runner uses the repo-root `.env`, creates temporary `sdk_test_*` database objects and buckets, exercises SDK methods, then tears them down.
+| Group | Suites | What it covers |
+| --- | --- | --- |
+| `sdk` | `auth`, `database`, `storage`, `realtime`, `functions` | [@supabase/supabase-js](https://supabase.com/docs/reference/javascript/introduction) method coverage against a live stack. Creates temporary `sdk_test_*` database objects and buckets, exercises SDK methods, then tears them down. Ends with a per-method coverage report. |
+| `smoke` | `auth-keys`, `gateway`, `self-hosted`, `storage`, `s3` | HTTP-level checks modeled on upstream [`docker/tests`](https://github.com/supabase/supabase/tree/master/docker/tests), adapted for headless (no Studio / pg-meta / MCP), plus Caddy-specific behaviour: CORS, security headers, blank-key sentinels, open auth routes, dashboard redirects, TUS, and the public Storage S3 protocol. |
+
+Both read the repo-root `.env`. Suites skip themselves rather than fail when their inputs are absent, so a stack running without the optional legacy HS256 keys still runs the rest. The `smoke:s3` suite needs `S3_PROTOCOL_ACCESS_KEY_ID` / `S3_PROTOCOL_ACCESS_KEY_SECRET` in `.env` (filled by `node generate-keys.mjs --update-env`) and a recreated `storage` service after those vars change.
 
 ---
 
@@ -238,7 +246,7 @@ Headless ships a lean default Auth surface so local bring-up stays simple. Produ
 - On Linux, consider Docker `userland-proxy: false` so Caddy can preserve real client IPs on host ports.
 - Back up Postgres and RustFS volumes before dependency or schema upgrades.
 - Keep `JWT_SECRET`, `JWT_KEYS`, `JWT_JWKS`, and API keys stable unless intentionally rotating credentials. `SUPABASE_SECRET_KEY` is server-only and maps to `service_role`.
-- Run `scripts/supabase-js` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
+- Run `tests` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
 - Never edit an applied migration file; checksum mismatches intentionally block startup.
 - Review the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) and upstream release notes before upgrading. Apps that vendor this repo bump the submodule tag ([VENDORING.md](./VENDORING.md)); stack maintainers bump image pins ([MAINTENANCE.md](./MAINTENANCE.md)).
 

@@ -1,4 +1,4 @@
-import { runSdkSuite } from '../lib.mjs'
+import { runChecks } from '../../lib/runner.mjs'
 
 function waitFor(channel, predicate, ms = 12_000) {
   return new Promise((resolve, reject) => {
@@ -59,13 +59,12 @@ async function waitForPostgresInsert(anon, service) {
 }
 
 export async function runRealtimeSuite(ctx) {
-  const { anon, service } = ctx
-  const second = ctx.second
+  const { anon, service, second } = ctx
 
   await prepareRealtimeClient(anon)
   await prepareRealtimeClient(second)
 
-  return runSdkSuite('realtime', [
+  return runChecks('sdk:realtime', [
     ['realtime.postgres_changes', async () => {
       try {
         await waitForPostgresInsert(anon, service)
@@ -132,5 +131,5 @@ export async function runRealtimeSuite(ctx) {
       if (anon.getChannels().length) throw new Error('channels remain')
     }],
     ['realtime.setAuth', null, { skip: 'implicit via supabase client session' }],
-  ])
+  ], { track: true })
 }

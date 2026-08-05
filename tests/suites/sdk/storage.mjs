@@ -1,4 +1,14 @@
-import { runSdkSuite, signInTestUser } from '../lib.mjs'
+import { runChecks } from '../../lib/runner.mjs'
+import { signInTestUser } from '../../lib/sdk.mjs'
+
+// Smallest valid 1x1 PNG, used to prove the imgproxy transform path returns an image.
+const PIXEL_PNG = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+  0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+  0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xfe, 0xd4, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+  0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+])
 
 export async function runStorageSuite(ctx) {
   const { anon, service } = ctx
@@ -9,7 +19,7 @@ export async function runStorageSuite(ctx) {
 
   const authed = () => anon.storage
 
-  const result = await runSdkSuite('storage', [
+  const result = await runChecks('sdk:storage', [
     ['storage.createBucket', async () => {
       const pub = await service.storage.createBucket(pubBucket, { public: true })
       if (pub.error) throw pub.error
@@ -74,6 +84,26 @@ export async function runStorageSuite(ctx) {
       if (error) throw error
       if (!data?.[0]?.signedUrl) throw new Error('createSignedUrls empty')
     }],
+    ['storage.from.createSignedUploadUrl', async () => {
+      const { data, error } = await authed().from(privBucket).createSignedUploadUrl('a/signed-up.txt')
+      if (error) throw error
+      const up = await authed().from(privBucket).uploadToSignedUrl(data.path, data.token, new Blob(['signed-up']), {
+        contentType: 'text/plain',
+      })
+      if (up.error) throw up.error
+    }],
+    ['storage.from.createSignedUrl.transform', async () => {
+      const up = await authed().from(pubBucket).upload('pixel.png', PIXEL_PNG, { contentType: 'image/png', upsert: true })
+      if (up.error) throw up.error
+      const { data, error } = await authed().from(pubBucket).createSignedUrl('pixel.png', 120, {
+        transform: { width: 32, height: 32, resize: 'cover' },
+      })
+      if (error) throw error
+      const res = await fetch(data.signedUrl)
+      if (!res.ok) throw new Error(`transform signed url ${res.status}`)
+      const ct = res.headers.get('content-type') || ''
+      if (!ct.includes('image')) throw new Error(`expected image content-type, got ${ct}`)
+    }],
     ['storage.from.copy', async () => {
       const { error } = await authed().from(privBucket).copy('a/hello.txt', 'a/copy.txt')
       if (error) throw error
@@ -99,9 +129,9 @@ export async function runStorageSuite(ctx) {
         if (error) throw error
       }
     }],
-    ['storage.from.upload.resumable', null, { skip: 'TUS client — not covered in this runner' }],
+    ['storage.from.upload.resumable', null, { skip: 'TUS covered at HTTP level in smoke:storage' }],
     ['storage.from.update', null, { skip: 'metadata update — optional' }],
-  ])
+  ], { track: true })
 
   if (storageUser?.userId) await service.auth.admin.deleteUser(storageUser.userId)
 

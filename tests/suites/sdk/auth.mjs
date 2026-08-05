@@ -1,12 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
-import {
-  clientOpts,
-  getConfig,
-  runSdkSuite,
-  signInExistingUser,
-  testPassword,
-  uniqueEmail,
-} from '../lib.mjs'
+import { getConfig } from '../../lib/config.mjs'
+import { runChecks, skip } from '../../lib/runner.mjs'
+import { clientOpts, signInExistingUser, testPassword, uniqueEmail } from '../../lib/sdk.mjs'
 
 export async function runAuthSuite(ctx) {
   const { anon, service } = ctx
@@ -40,7 +35,6 @@ export async function runAuthSuite(ctx) {
       if (!data.users.length) throw new Error('empty user list')
     }],
     ['auth.signInWithPassword', async () => {
-      if (config.captchaEnabled && !captchaToken) return 'skip'
       const { data, error } = await anon.auth.signInWithPassword({
         email,
         password,
@@ -51,27 +45,22 @@ export async function runAuthSuite(ctx) {
       if (!session?.access_token) throw new Error('no session')
     }, config.captchaEnabled && !captchaToken ? { skip: 'set SDK_TEST_CAPTCHA_TOKEN or uses verifyOtp fallback below' } : undefined],
     ['auth.admin.generateLink', async () => {
-      if (!config.captchaEnabled) return 'skip'
       const { data, error } = await service.auth.admin.generateLink({ type: 'magiclink', email })
       if (error) throw error
       if (!data.properties?.hashed_token) throw new Error('missing hashed_token')
     }, !config.captchaEnabled ? { skip: 'only needed when captcha blocks password sign-in' } : undefined],
     ['auth.verifyOtp', async () => {
-      if (config.captchaEnabled && !captchaToken) {
-        await anon.auth.signOut()
-        const link = await service.auth.admin.generateLink({ type: 'magiclink', email })
-        if (link.error) throw link.error
-        const { data, error } = await anon.auth.verifyOtp({
-          email,
-          token: link.data.properties.email_otp,
-          type: 'email',
-        })
-        if (error) throw error
-        session = data.session
-        if (!session?.access_token) throw new Error('no session from verifyOtp')
-        return
-      }
-      return 'skip'
+      await anon.auth.signOut()
+      const link = await service.auth.admin.generateLink({ type: 'magiclink', email })
+      if (link.error) throw link.error
+      const { data, error } = await anon.auth.verifyOtp({
+        email,
+        token: link.data.properties.email_otp,
+        type: 'email',
+      })
+      if (error) throw error
+      session = data.session
+      if (!session?.access_token) throw new Error('no session from verifyOtp')
     }, config.captchaEnabled && !captchaToken ? undefined : { skip: 'captcha off or SDK_TEST_CAPTCHA_TOKEN set' }],
     ['auth.getSession', async () => {
       if (!session) session = await signInExistingUser(anon, service, { email, password })
@@ -144,15 +133,14 @@ export async function runAuthSuite(ctx) {
       if (!config.mailerAutoconfirm && data.session) throw new Error('expected no session without autoconfirm')
       if (data.user?.id) await service.auth.admin.deleteUser(data.user.id)
     }, config.captchaEnabled ? { skip: 'GOTRUE_SECURITY_CAPTCHA_ENABLED' } : undefined],
-    config.anonymousEnabled
-      ? ['auth.signInAnonymously', async () => {
-          const { data, error } = await anon.auth.signInAnonymously()
-          if (error) throw error
-          if (!data.user?.is_anonymous) throw new Error('not anonymous')
-          await anon.auth.signOut()
-          if (data.user.id) await service.auth.admin.deleteUser(data.user.id)
-        }]
-      : ['auth.signInAnonymously', null, { skip: 'GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false' }],
+    ['auth.signInAnonymously', async () => {
+      if (!config.anonymousEnabled) return skip('GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false')
+      const { data, error } = await anon.auth.signInAnonymously()
+      if (error) throw error
+      if (!data.user?.is_anonymous) throw new Error('not anonymous')
+      await anon.auth.signOut()
+      if (data.user.id) await service.auth.admin.deleteUser(data.user.id)
+    }],
     ['auth.signInWithOAuth', null, { skip: 'requires browser OAuth redirect' }],
     ['auth.signInWithOtp', null, { skip: 'requires SMTP / inbox capture' }],
     ['auth.signInWithSSO', null, { skip: 'requires SSO provider configuration' }],
@@ -177,5 +165,5 @@ export async function runAuthSuite(ctx) {
     }],
   ]
 
-  return runSdkSuite('auth', tests)
+  return runChecks('sdk:auth', tests, { track: true })
 }
