@@ -424,6 +424,12 @@ services:
       AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
 
+      # Storage's own S3-compatible protocol at /storage/v1/s3 (client credentials; not RustFS keys)
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+      # Required when the gateway strips /storage/v1 and forwards X-Forwarded-* for SigV4
+      S3_ALLOW_FORWARDED_HEADER: "true"
+
       # Public URL / gateway prefix
       STORAGE_PUBLIC_URL: ${PUBLIC_API_URL}
       # Honour the gateway's X-Forwarded-Prefix header so S3 SigV4 signature verification and TUS upload Location URLs reconstruct the original /storage/v1 prefix correctly.
@@ -431,7 +437,6 @@ services:
 
       # Uploads
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
-      TUS_URL_PATH: ${STORAGE_PREFIX:-/storage/v1}/upload/resumable
       TUS_ALLOW_S3_TAGS: "false"
 
       # Image transforms
