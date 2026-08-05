@@ -8,4 +8,4 @@ logs/
 caddy-local-root.crt
 database.types.ts
 
-scripts/supabase-js/node_modules/
+tests/node_modules/
