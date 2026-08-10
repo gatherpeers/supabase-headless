@@ -9,3 +9,6 @@ caddy-local-root.crt
 database.types.ts
 
 tests/node_modules/
+
+# Specific development project documentation
+/docs
