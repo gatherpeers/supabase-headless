@@ -99,7 +99,7 @@ services:
 
   # Isolated from the default compose, used to generate on-demand database types.
   postgres-meta:
-    image: supabase/postgres-meta:v0.96.8
+    image: supabase/postgres-meta:v0.97.0
     profiles: ['meta']
     restart: always
     security_opt:
@@ -177,7 +177,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.124.3
+    image: supabase/realtime:v2.125.1
     logging: *default-logging
     restart: always
     security_opt:
@@ -381,7 +381,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.68.15
+    image: supabase/storage-api:v1.69.0
     logging: *default-logging
     restart: always
     security_opt:
