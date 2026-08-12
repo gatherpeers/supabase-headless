@@ -82,7 +82,7 @@ The goal is compatibility with the official Supabase client SDKs for the enabled
 
 Compatibility does **not** mean feature parity with Supabase Cloud or Studio. This stack deliberately excludes Studio, dashboard-managed schema editing, Supavisor, Logflare, Vector, Analytics, and platform-specific operations. It also uses a lean Postgres image (not the full `supabase/postgres` extension suite), so capabilities such as `pg_graphql` / `pg_cron` / Vault are not assumed unless you add them yourself.
 
-SDK and gateway coverage lives in `tests` and should be run after dependency upgrades or gateway/auth changes.
+SDK and gateway coverage lives in [tests](./tests/README.md) and should be run after dependency upgrades or changes.
 
 ---
 
@@ -116,6 +116,7 @@ No service except `gateway` publishes host ports. In production, the firewall sh
 - [caddy/README.md](./caddy/README.md) — gateway behavior, routes, API-key translation, CORS, CDN notes
 - [db/README.md](./db/README.md) — bootstrap SQL, stack/app migrations, auth helpers, type generation, production migration rules
 - [functions/README.md](./functions/README.md) — Edge Runtime loader, function layout, shared Supabase clients
+- [tests/README.md](./tests/README.md) — SDK + smoke integration suites against a live stack
 - [MAINTENANCE.md](./MAINTENANCE.md) — stack-maintainer dependency pins, upgrade recipes, and cutting release tags
 - [ROADMAP.md](./ROADMAP.md) — planned operational work and non-goals
 
@@ -213,23 +214,7 @@ For internet-facing deployments, use a strong generated password and prefer an a
 
 ## Integration Tests
 
-One package in [tests](./tests/) holds both suites. Run it with the stack up; when `PUBLIC_API_DOMAIN=localhost`, complete [Local HTTPS](#local-https) first.
-
-```bash
-cd tests
-npm install
-npm test                          # everything
-npm run test:sdk                  # or: node . sdk
-npm run test:smoke                # or: node . smoke
-node . sdk:storage smoke:s3       # individual suites
-```
-
-| Group | Suites | What it covers |
-| --- | --- | --- |
-| `sdk` | `auth`, `database`, `storage`, `realtime`, `functions` | [@supabase/supabase-js](https://supabase.com/docs/reference/javascript/introduction) method coverage against a live stack. Creates temporary `sdk_test_*` database objects and buckets, exercises SDK methods, then tears them down. Ends with a per-method coverage report. |
-| `smoke` | `auth-keys`, `gateway`, `self-hosted`, `storage`, `s3` | HTTP-level checks modeled on upstream [`docker/tests`](https://github.com/supabase/supabase/tree/master/docker/tests), adapted for headless (no Studio / pg-meta / MCP), plus Caddy-specific behaviour: CORS, security headers, blank-key sentinels, open auth routes, dashboard redirects, TUS, and the public Storage S3 protocol. |
-
-Both read the repo-root `.env`. Suites skip themselves rather than fail when their inputs are absent, so a stack running without the optional legacy HS256 keys still runs the rest. The `smoke:s3` suite needs `S3_PROTOCOL_ACCESS_KEY_ID` / `S3_PROTOCOL_ACCESS_KEY_SECRET` in `.env` (filled by `node generate-keys.mjs --update-env`) and a recreated `storage` service after those vars change.
+SDK and smoke suites live under [tests](./tests/). How to run them, what they cover, and env/HTTPS notes: [tests/README.md](./tests/README.md).
 
 ---
 
@@ -246,7 +231,7 @@ Headless ships a lean default Auth surface so local bring-up stays simple. Produ
 - On Linux, consider Docker `userland-proxy: false` so Caddy can preserve real client IPs on host ports.
 - Back up Postgres and RustFS volumes before dependency or schema upgrades.
 - Keep `JWT_SECRET`, `JWT_KEYS`, `JWT_JWKS`, and API keys stable unless intentionally rotating credentials. `SUPABASE_SECRET_KEY` is server-only and maps to `service_role`.
-- Run `tests` after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
+- Run [tests](./tests/README.md) after gateway, auth, PostgREST, storage, realtime, or SDK upgrades.
 - Never edit an applied migration file; checksum mismatches intentionally block startup.
 - Review the official [Supabase self-hosted Docker changelog](https://github.com/supabase/supabase/blob/master/docker/CHANGELOG.md) and upstream release notes before upgrading. Apps that vendor this repo bump the submodule tag ([VENDORING.md](./VENDORING.md)); stack maintainers bump image pins ([MAINTENANCE.md](./MAINTENANCE.md)).
 
