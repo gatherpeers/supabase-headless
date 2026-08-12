@@ -35,7 +35,7 @@ It creates:
 - Ownership-only: `supabase_realtime_admin`, `dashboard_user` (stub for Realtime migrations)
 - Extensions: `pg_stat_statements`, `postgis`, `pgcrypto`
 - Publication: `supabase_realtime`
-- Default privileges for API roles on `public` and `storage`; the `public` ones are revoked again by [stack migration `000`](./stack/migrations/000_revoke_public_default_privileges.sql) (see [Data API Exposure](#data-api-exposure))
+- Default privileges for API roles on `public` and `storage`; public table/sequence defaults are revoked by [stack migration `000`](./stack/migrations/000_revoke_public_default_privileges.sql), and function `EXECUTE`-to-`PUBLIC` by [stack migration `001`](./stack/migrations/001_revoke_public_default_privileges_functions.sql) (see [Data API Exposure](#data-api-exposure))
 
 Do not put upgrade logic in `init.sql`. Existing deployments will not receive it. Use `stack/migrations/` for platform compatibility changes and `app/migrations/` for application schema.
 
@@ -51,7 +51,7 @@ Grants and RLS are separate layers: grants decide whether a role can reach an ob
 
 ### Data API Exposure
 
-Tables in `public` are not reachable through PostgREST until you grant privileges on them, matching the [Supabase platform default](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically). [Stack migration `000_revoke_public_default_privileges.sql`](./stack/migrations/000_revoke_public_default_privileges.sql) removes the bootstrap default privileges for `anon`, `authenticated`, and `service_role` on tables and sequences created by `postgres` in `public`. Only future objects are affected, so existing volumes keep working after an update.
+Tables and functions created by `postgres` are not reachable through PostgREST until you grant privileges on them. [Stack migration `000`](./stack/migrations/000_revoke_public_default_privileges.sql) removes the bootstrap default privileges for `anon`, `authenticated`, and `service_role` on tables and sequences in `public` (matching the [Supabase platform default](https://supabase.com/changelog/45329-breaking-change-tables-not-exposed-to-data-and-graphql-api-automatically)). [Stack migration `001`](./stack/migrations/001_revoke_public_default_privileges_functions.sql) revokes the Postgres `EXECUTE`-to-`PUBLIC` default for functions created by `postgres` (global form; a per-schema revoke is a no-op). Only future objects are affected, so existing volumes keep working after an update.
 
 Example of granting and securing a table:
 
@@ -67,9 +67,16 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 A missing grant returns PostgREST `42501` with the required `GRANT` in the error hint.
 
-Functions are the exception. Postgres grants `EXECUTE` on new functions to `PUBLIC` globally, and per-schema default privileges can only add to the global set, so this cannot be revoked for `public` alone ([ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html)). A function created in `public` is callable over `/rest/v1/rpc/` by `anon` unless you `REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC`. Keep internal helpers out of `public`, or revoke per function.
+For RPCs you want exposed, grant explicitly (same pattern as tables):
 
-`storage`, `auth`, and `realtime` keep their default privileges; those schemas are owned by their services and are out of scope for the upstream change too.
+```sql
+GRANT EXECUTE ON FUNCTION public.my_rpc(argtypes) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.my_rpc(argtypes) TO service_role;
+```
+
+Internal helpers (triggers, etc.) need no `REVOKE` after `001` — they are not callable via `/rest/v1/rpc/` unless granted. Existing functions keep whatever ACLs they already have.
+
+`storage`, `auth`, and `realtime` keep their default privileges; those schemas are owned by their services and are out of scope.
 
 ## Auth Helper Functions
 
