@@ -220,7 +220,7 @@ Keep platform secrets and type generation pointed at the vendor scripts; keep ge
 
 ## Prebuilt database image
 
-Release tags publish `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` (public). Pin the submodule to the same `vX.Y.Z` that [compose.yml](./compose.yml) uses for `db.image`. The image is the engine only; app schema still comes from mounted `db/app/migrations`.
+A release publishes `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` only when the engine Dockerfile (or its publish workflow) changed. [compose.yml](./compose.yml) `db.image` is that engine pin; it may lag the submodule git tag. The image is the engine only; app schema still comes from mounted `db/app/migrations`.
 
 Compose keeps `build:` next to `image:`:
 

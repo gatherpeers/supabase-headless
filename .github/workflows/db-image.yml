@@ -1,18 +1,17 @@
 # Build and publish the Postgres engine image to GHCR.
 #
-# Trigger: push a semver tag (v0.0.29, v1.2.3, …). Tag the same commit that
-# already pins that version in compose.yml. Auth: GITHUB_TOKEN only.
+# Trigger: push a semver tag (v0.0.29, v1.2.3, …). Auth: GITHUB_TOKEN only.
+# The image is only rebuilt when db/Dockerfile, db/.dockerignore, or this
+# workflow changed since the previous v* tag. Otherwise the job is skipped and
+# compose.yml should keep the existing db.image pin.
 #
-# metadata-action sets org.opencontainers.image.source, which links the package
-# to this public repo so GHCR can inherit public visibility. If the first push
-# is still private, set the package to Public in GitHub Packages once.
-#
-# linux/arm64 is built under QEMU on ubuntu-latest (amd64). Expect this job to
-# take longer than an amd64-only build; switch arm64 to ubuntu-24.04-arm if it
-# is too slow or flaky.
+# Each architecture builds natively (no QEMU), pushes by digest, then a merge
+# job creates the multi-arch tag. metadata-action sets
+# org.opencontainers.image.source so GHCR can inherit public visibility from
+# this repo. If the first push is still private, set the package to Public once.
 #
 # Pattern follows https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images
-# Image tag is the git tag (vX.Y.Z), matching the pin in compose.yml.
+# When this workflow publishes, the image tag is the git tag (vX.Y.Z).
 
 name: Release db image
 
@@ -32,16 +31,58 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-and-push:
-    name: Build and push
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  gate:
+    name: Engine changed?
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      build: ${{ steps.diff.outputs.build }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compare with previous tag
+        id: diff
+        run: |
+          prev="$(git tag --list 'v*.*.*' --sort=-v:refname | awk -v cur="${GITHUB_REF_NAME}" '$0 != cur { print; exit }')"
+          if [ -z "$prev" ]; then
+            echo "No previous tag — building"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$prev" "${GITHUB_REF_NAME}" -- \
+            db/Dockerfile db/.dockerignore .github/workflows/db-image.yml
+          then
+            echo "Engine unchanged since ${prev} — skipping image"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Engine or publish workflow changed since ${prev} — building"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: ${{ matrix.platform }}
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            digest_name: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            digest_name: arm64
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
-      artifact-metadata: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -49,8 +90,71 @@ jobs:
       - name: Set image name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/db" >> "$GITHUB_ENV"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./db
+          file: ./db/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=db-${{ matrix.digest_name }}
+          cache-to: type=gha,mode=min,scope=db-${{ matrix.digest_name }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.digest_name }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge and attest
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+      artifact-metadata: write
+    steps:
+      - name: Set image name
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/db" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -72,24 +176,26 @@ jobs:
           tags: |
             type=semver,pattern={{raw}}
 
-      - name: Build and push Docker image
-        id: push
-        uses: docker/build-push-action@v7
-        with:
-          context: ./db
-          file: ./db/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=db
-          cache-to: type=gha,mode=max,scope=db
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        id: inspect
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}"
+          docker buildx imagetools inspect "$image"
+          digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Generate artifact attestation
         uses: actions/attest@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.inspect.outputs.digest }}
           push-to-registry: true
 
       - name: Summary
@@ -101,5 +207,5 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
             echo ""
-            echo "Digest: \`${{ steps.push.outputs.digest }}\`"
+            echo "Digest: \`${{ steps.inspect.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
