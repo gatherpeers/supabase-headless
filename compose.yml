@@ -4,11 +4,13 @@ x-logging: &default-logging
     max-size: "20m"
     max-file: "3"
 
+# Engine image shared by db (server) and db-migrate (psql only). Bump when a new engine image is published.
+x-db-image: &db-image ghcr.io/gatherpeers/supabase-headless/db:v0.0.29
+
 services:
 
   db:
-    # Engine only (Postgres + PostGIS + wal2json). Bump this pin only when a new engine image was published (db/Dockerfile change). Compose pulls this, then builds ./db if the tag is not in GHCR yet.
-    image: ghcr.io/gatherpeers/supabase-headless/db:v0.0.29
+    image: *db-image
     build:
       context: ./db
       dockerfile: Dockerfile
@@ -67,7 +69,7 @@ services:
 
   # Automatic database migrations: stack -> app (if mounted by user). Runs psql, thus never starts a Postgres server.
   db-migrate:
-    image: postgres:18.4-alpine
+    image: *db-image
     restart: "no"
     security_opt:
       - "no-new-privileges:true"
