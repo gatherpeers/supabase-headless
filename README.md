@@ -91,7 +91,7 @@ SDK and gateway coverage lives in [tests](./tests/README.md) and should be run a
 Only `gateway` publishes host ports (`80`, `443`). Every public API request enters through Caddy.
 
 - `gateway`: [Caddy 2](https://caddyserver.com/) with [caddy-ratelimit](https://github.com/mholt/caddy-ratelimit); TLS, routing, CORS, rate limits, logs, API-key translation.
-- `db`: custom PostgreSQL 18 image with PostGIS, `wal2json`, and `pg_stat_statements`.
+- `db`: custom PostgreSQL 18 image with PostGIS, `wal2json`, and `pg_stat_statements` (prebuilt as `ghcr.io/gatherpeers/supabase-headless/db:<git-tag>`).
 - `db-migrate`: one-shot migration sidecar that applies stack SQL and app SQL with checksum tracking.
 - `auth`: [Supabase Auth / GoTrue](https://github.com/supabase/auth).
 - `rest`: [PostgREST](https://postgrest.org/).

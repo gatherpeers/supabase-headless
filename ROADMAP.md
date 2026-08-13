@@ -7,8 +7,8 @@ The product focus stays fixed: a lean, SDK-compatible Supabase data plane that o
 ## Production Readiness
 
 - Document a backup and restore procedure for `db_data`, `rustfs_data`, and `caddy_data`.
-- Add a CI workflow that validates compose config, builds `db` and `gateway`, and runs syntax checks.
-- Publish prebuilt `db` and `gateway` images for deployments that should not build on the target host.
+- Add a CI workflow that validates compose config, builds `gateway`, and runs syntax checks.
+- Publish a prebuilt `gateway` image for deployments that should not build on the target host (`db` is published to GHCR when a git tag is pushed).
 - Add a minimal monitoring guide for healthchecks, Caddy access logs, Postgres slow queries, and disk usage.
 - Provide separate example overlays for local development and production deployment.
 

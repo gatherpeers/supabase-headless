@@ -1,0 +1,105 @@
+# Build and publish the Postgres engine image to GHCR.
+#
+# Trigger: push a semver tag (v0.0.29, v1.2.3, …). Tag the same commit that
+# already pins that version in compose.yml. Auth: GITHUB_TOKEN only.
+#
+# metadata-action sets org.opencontainers.image.source, which links the package
+# to this public repo so GHCR can inherit public visibility. If the first push
+# is still private, set the package to Public in GitHub Packages once.
+#
+# linux/arm64 is built under QEMU on ubuntu-latest (amd64). Expect this job to
+# take longer than an amd64-only build; switch arm64 to ubuntu-24.04-arm if it
+# is too slow or flaky.
+#
+# Pattern follows https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images
+# Image tag is the git tag (vX.Y.Z), matching the pin in compose.yml.
+
+name: Release db image
+
+run-name: Release db image ${{ github.ref_name }}
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-db-image-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    name: Build and push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+      artifact-metadata: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/db" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{raw}}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: ./db
+          file: ./db/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=db
+          cache-to: type=gha,mode=max,scope=db
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        run: |
+          {
+            echo "## Published"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "Digest: \`${{ steps.push.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

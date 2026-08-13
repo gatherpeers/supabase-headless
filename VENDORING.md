@@ -218,6 +218,18 @@ my-app/
 
 Keep platform secrets and type generation pointed at the vendor scripts; keep generated outputs (`database.types.ts`, `caddy-local-root.crt`) in the app repo or gitignored as you prefer — never write them under `vendor/`.
 
+## Prebuilt database image
+
+Release tags publish `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` (public). Pin the submodule to the same `vX.Y.Z` that [compose.yml](./compose.yml) uses for `db.image`. The image is the engine only; app schema still comes from mounted `db/app/migrations`.
+
+Compose keeps `build:` next to `image:`:
+
+- `docker compose up` pulls the GHCR image when that tag exists.
+- If the tag is missing (or the pull fails), Compose builds [db/Dockerfile](./db/Dockerfile) locally. A registry error in the log before the build is expected.
+- `docker compose build db` always builds from the Dockerfile (use that when iterating on the image).
+
+Type generation (`db/types-gen-ts.sh`) still needs a running stack after `db-migrate` has completed. It does not publish this image.
+
 ## Related Docs
 
 - [README.md](./README.md) — architecture, first-time setup of the stack itself, local HTTPS, production checklist

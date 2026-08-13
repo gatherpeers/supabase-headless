@@ -8,17 +8,20 @@ It still does not blindly track `latest`: version numbers live in source files a
 
 ## Pin Locations
 
-- Compose images: [compose.yml](./compose.yml)
+- Compose images: [compose.yml](./compose.yml) (including the prebuilt `db` image tag)
 - PostgreSQL, PostGIS, and `wal2json`: [db/Dockerfile](./db/Dockerfile)
 - Caddy and `caddy-ratelimit`: [caddy/Dockerfile](./caddy/Dockerfile)
 - Deno/npm/jsr imports: [functions/](./functions/) (especially `index.ts` and `_shared/supabase.ts`)
 - Test dependencies: [tests/package.json](./tests/package.json) — keep `@supabase/supabase-js` aligned with the functions pin
 - PostgREST type-generation compatibility: [db/types-gen-ts.sh](./db/types-gen-ts.sh)
 - Node image used for key generation examples: [generate-keys.mjs](./generate-keys.mjs) (and the looser `node:24-alpine` example in [README.md](./README.md))
+- GitHub Actions: [`.github/workflows/db-image.yml`](./.github/workflows/db-image.yml)
 
 ## Tags And Digests
 
 Explicit version tags such as `supabase/auth:<tag>` are usually enough for a self-hosted stack when upgrades are tested before deployment.
+
+The prebuilt `db` image uses the same scheme: `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` matches the git tag in [compose.yml](./compose.yml). Do not use `latest`.
 
 Use image digests when you need bit-identical pulls across hosts or compliance requires immutable artifacts:
 
@@ -38,16 +41,16 @@ curl -sL "https://hub.docker.com/v2/repositories/rustfs/rc/tags/<tag>" | sed -n 
 
 1. List current pins:
   ```bash
-   rg 'image:|^FROM |npm:|jsr:|ENV .*VERSION|caddy-ratelimit@|POSTGREST_VERSION|node:[0-9]' \
+   rg 'image:|^FROM |npm:|jsr:|ENV .*VERSION|caddy-ratelimit@|POSTGREST_VERSION|node:[0-9]|uses:' \
      compose.yml */Dockerfile functions/ db/types-gen-ts.sh \
-     tests/package.json generate-keys.mjs
+     tests/package.json generate-keys.mjs .github/workflows
   ```
 2. Check each pin against upstream (see [Version Check Recipes](#version-check-recipes)).
 3. Read upstream release notes and breaking-change notes.
 4. Cross-check the [official Supabase Docker versions](https://github.com/supabase/supabase/blob/master/docker/versions.md) for compatible service sets. Headless often runs ahead of that bundle — treat it as a compatibility hint, not a ceiling.
 5. Update source files (and `npm install` under `tests` when the SDK pin changes).
 6. Add stack migrations for database compatibility changes that existing volumes must receive.
-7. Rebuild custom images (`docker compose build db gateway`, and `functions` when the loader or imports changed).
+7. Rebuild custom images (`docker compose build gateway`, and `functions` when the loader or imports changed). `db` is pulled from GHCR on `up`; `docker compose build db` only if you changed [db/Dockerfile](./db/Dockerfile) locally.
 8. Start the stack with `docker compose up -d`.
 9. Run the integration suites from `tests` (`npm test`).
 
@@ -77,7 +80,7 @@ docker run --rm postgres:<tag> bash -c \
   "apt-get update -qq && apt-cache madison postgresql-18 postgresql-18-postgis-3 postgresql-18-wal2json"
 ```
 
-Use the same `postgres:<tag>` as [db/Dockerfile](./db/Dockerfile) (`*-trixie`). Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. Keep `db-migrate` on the same PostgreSQL major/minor tag as the main database image.
+Use the same `postgres:<tag>` as [db/Dockerfile](./db/Dockerfile) (`*-trixie`). Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. Keep `db-migrate` on the same PostgreSQL major/minor tag as the main database image. Pushing a `vX.Y.Z` git tag publishes `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` (`linux/amd64` and `linux/arm64`). After the first push, set the GHCR package visibility to **Public**.
 
 For Caddy:
 
@@ -138,7 +141,7 @@ docker compose pull auth
 docker compose up -d auth
 
 # Custom images
-docker compose build db gateway
+docker compose build gateway
 docker compose up -d
 
 # Function import changes
@@ -149,6 +152,7 @@ docker compose up -d functions
 ## Release Checklist
 
 - Every `image:` in [compose.yml](./compose.yml) has an explicit tag.
+- The `db` image in [compose.yml](./compose.yml) is `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` with **the same** `vX.Y.Z` you are about to tag.
 - PGDG packages in [db/Dockerfile](./db/Dockerfile) are version-pinned.
 - Function imports use exact versions, not floating ranges.
 - `@supabase/supabase-js` matches across [functions/_shared/supabase.ts](./functions/_shared/supabase.ts) and [tests/package.json](./tests/package.json).
@@ -165,3 +169,5 @@ git tag -a vX.Y.Z -m "Short description of the release"
 git push origin main
 git push origin vX.Y.Z
 ```
+
+Tag the commit that already contains the matching `db.image` pin. Wait for the **Release db image** workflow on that tag to finish before expecting `docker compose pull db` to see `:vX.Y.Z`.

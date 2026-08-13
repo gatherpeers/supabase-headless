@@ -7,6 +7,8 @@ x-logging: &default-logging
 services:
 
   db:
+    # Engine only (Postgres + PostGIS + wal2json). Tag = git release tag; bump in the same commit you tag. Compose pulls this, then builds ./db if the tag is not in GHCR yet (a pull-error line before the build is expected).
+    image: ghcr.io/gatherpeers/supabase-headless/db:v0.0.29
     build:
       context: ./db
       dockerfile: Dockerfile

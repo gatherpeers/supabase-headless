@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL is the source of truth for this stack — not a dashboard. The database image is PostgreSQL 18 ([Dockerfile](./Dockerfile): official `postgres` tag plus pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`).
+PostgreSQL is the source of truth for this stack — not a dashboard. The database image is PostgreSQL 18 ([Dockerfile](./Dockerfile): official `postgres` tag plus pinned PGDG packages for [PostGIS](https://postgis.net/), `wal2json`, and `pg_stat_statements`). Release tags publish that engine to `ghcr.io/gatherpeers/supabase-headless/db:<git-tag>`; bootstrap SQL and migrations stay bind-mounted.
 
 Unlike the official self-hosted bundle's `supabase/postgres` image, this is a lean Postgres 18 build sized for the Headless data plane: the roles, schemas, and extensions Auth / PostgREST / Realtime / Storage need, without shipping the full Cloud extension suite (`pg_graphql`, `pg_cron`, Vault, and similar are not assumed). That keeps the image inspectable and upgradeable on a current major, at the cost of not mirroring every hosted Postgres feature out of the box.
 
@@ -153,9 +153,7 @@ docker compose exec db sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1
 ./db/types-gen-ts.sh public,storage,auth ./database.types.ts
 ```
 
-The script starts [postgres-meta](https://github.com/supabase/postgres-meta) under the `meta` profile, calls `/generators/typescript`, writes the output file, and stops the service. `db-migrate` must have completed successfully first.
-
-Keep `POSTGREST_VERSION` in [types-gen-ts.sh](./types-gen-ts.sh) aligned with the `rest` image tag in [compose.yml](../compose.yml).
+The script starts [postgres-meta](https://github.com/supabase/postgres-meta) under the `meta` profile, calls `/generators/typescript`, writes the output file, and stops the service. `db-migrate` must have completed successfully first. Keep `POSTGREST_VERSION` in [types-gen-ts.sh](./types-gen-ts.sh) aligned with the `rest` image tag in [compose.yml](../compose.yml). Prebuilt engine image: [VENDORING.md](../VENDORING.md#prebuilt-database-image).
 
 ## Connection Budget
 
