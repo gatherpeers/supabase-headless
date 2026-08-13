@@ -80,7 +80,7 @@ docker run --rm postgres:<tag> bash -c \
   "apt-get update -qq && apt-cache madison postgresql-18 postgresql-18-postgis-3 postgresql-18-wal2json"
 ```
 
-Use the same `postgres:<tag>` as [db/Dockerfile](./db/Dockerfile) (`*-trixie`). Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. Keep `db-migrate` on the same PostgreSQL major/minor tag as the main database image. A `vX.Y.Z` git tag publishes `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` only if the engine or [`.github/workflows/db-image.yml`](./.github/workflows/db-image.yml) changed since the previous tag. After the first push, set the GHCR package visibility to **Public**.
+Use the same `postgres:<tag>` as [db/Dockerfile](./db/Dockerfile) (`*-trixie`). Update `PG_VERSION`, `POSTGIS_VERSION`, and `WAL2JSON_VERSION` together. `db-migrate` uses the same GHCR engine image as `db` (psql only; it never starts a server). A `vX.Y.Z` git tag publishes `ghcr.io/gatherpeers/supabase-headless/db:vX.Y.Z` only if the engine or [`.github/workflows/db-image.yml`](./.github/workflows/db-image.yml) changed since the previous tag. After the first push, set the GHCR package visibility to **Public**.
 
 For Caddy:
 
