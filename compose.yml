@@ -5,7 +5,7 @@ x-logging: &default-logging
     max-file: "3"
 
 # Engine image shared by db (server) and db-migrate (psql only). Bump when a new engine image is published.
-x-db-image: &db-image ghcr.io/gatherpeers/supabase-headless/db:v0.0.29
+x-db-image: &db-image ghcr.io/gatherpeers/supabase-headless/db:v0.0.32
 
 services:
 
@@ -103,7 +103,7 @@ services:
 
   # Isolated from the default compose, used to generate on-demand database types.
   postgres-meta:
-    image: supabase/postgres-meta:v0.97.0
+    image: supabase/postgres-meta:v0.98.0
     profiles: ['meta']
     restart: always
     security_opt:
@@ -181,7 +181,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.125.2
+    image: supabase/realtime:v2.128.0
     logging: *default-logging
     restart: always
     security_opt:
@@ -291,7 +291,7 @@ services:
       start_period: 15s
 
   rustfs:
-    image: rustfs/rustfs:1.0.0-beta.12
+    image: rustfs/rustfs:1.0.0-rc.2
     restart: always
     logging: *default-logging
     security_opt:
@@ -385,7 +385,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.69.2
+    image: supabase/storage-api:v1.69.9
     logging: *default-logging
     restart: always
     security_opt:

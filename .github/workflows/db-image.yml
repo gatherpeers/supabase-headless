@@ -41,7 +41,7 @@ jobs:
       build: ${{ steps.diff.outputs.build }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -127,7 +127,7 @@ jobs:
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.digest_name }}
           path: ${{ runner.temp }}/digests/*
@@ -150,7 +150,7 @@ jobs:
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/db" >> "$GITHUB_ENV"
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*

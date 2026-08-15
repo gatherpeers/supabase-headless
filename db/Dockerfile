@@ -1,12 +1,12 @@
 # Published as ghcr.io/gatherpeers/supabase-headless/db:<git-tag> (see .github/workflows/db-image.yml).
 # To update the pins, run:
-# docker run --rm postgres:18.4-trixie bash -c "apt-get update -qq && apt-cache madison postgresql-18 postgresql-18-postgis-3 postgresql-18-wal2json"
+# docker run --rm postgres:18.6-trixie bash -c "apt-get update -qq && apt-cache madison postgresql-18 postgresql-18-postgis-3 postgresql-18-wal2json"
 
-FROM postgres:18.4-trixie
+FROM postgres:18.6-trixie
 
-ENV PG_VERSION=18.4-1.pgdg13+1
+ENV PG_VERSION=18.6-1.pgdg13+2
 ENV POSTGIS_VERSION=3.6.4+dfsg-2.pgdg13+1
-ENV WAL2JSON_VERSION=2.6-3.pgdg13+1
+ENV WAL2JSON_VERSION=2.6-4.pgdg13+1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
