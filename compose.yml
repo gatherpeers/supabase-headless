@@ -131,7 +131,7 @@ services:
       - private_net
 
   auth:
-    image: supabase/auth:v2.195.0
+    image: supabase/auth:v2.196.0
     logging: *default-logging
     restart: always
     security_opt:
@@ -183,7 +183,7 @@ services:
       start_period: 15s
 
   realtime:
-    image: supabase/realtime:v2.129.1
+    image: supabase/realtime:v2.129.2
     logging: *default-logging
     restart: always
     security_opt:
@@ -387,7 +387,7 @@ services:
       start_period: 10s
 
   storage:
-    image: supabase/storage-api:v1.70.1
+    image: supabase/storage-api:v1.70.3
     logging: *default-logging
     restart: always
     security_opt:
