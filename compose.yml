@@ -37,8 +37,9 @@ services:
       -c max_slot_wal_keep_size=4GB
       -c max_wal_senders=10
       -c output_plugin_libraries=pgoutput,test_decoding,wal2json
-      -c log_min_messages=warning
       -c work_mem=${POSTGRES_WORK_MEM:-32MB}
+      -c log_checkpoints=off
+      -c log_min_messages=warning
       -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT:-200}
       -c shared_preload_libraries='pg_stat_statements'
       -c pg_stat_statements.track=all
